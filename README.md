@@ -88,6 +88,12 @@ select **Install**.
 
 [View on Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=formulahendry.wechat-ahp)
 
+[View on Open VSX](https://open-vsx.org/extension/formulahendry/wechat-ahp)
+
+Open VSX is an alternative distribution channel. The same local Agent Host
+requirements apply; availability in a registry does not mean every editor
+supports AHP.
+
 ## Get started
 
 1. Open the local folder used by your existing agent session and trust it in VS Code.

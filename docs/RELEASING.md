@@ -15,11 +15,17 @@ explicit request.
 
 1. Make the repository and its `main` branch public, including the README,
    changelog, license, and reviewed images under `media`.
-2. Confirm that the publisher has permission to publish `wechat-ahp`.
-3. Create a GitHub environment named **marketplace**, with required reviewers
-   and an appropriate allowed-ref policy.
-4. Add **VSCE_PAT** to that environment. It needs Marketplace management scope
-   and access to the publisher. Never put the token in source or chat.
+2. Confirm permission to publish `wechat-ahp` under the `formulahendry` publisher
+   in Visual Studio Marketplace and the `formulahendry` namespace in Open VSX.
+3. Add the following **Repository secrets** under **Settings > Secrets and
+   variables > Actions**. Never put token values in source or chat.
+
+| Secret | Credential |
+|---|---|
+| `VSCE_PAT` | Azure DevOps PAT with Marketplace management scope and access to the publisher |
+| `OVSX_PAT` | Open VSX access token with permission to publish in the namespace |
+
+No GitHub Environment or environment approval is required by this workflow.
 
 The Marketplace icon and README images are PNG. The Activity Bar icon is SVG.
 Only cropped/redacted screenshot derivatives belong in the repository. The
@@ -39,25 +45,27 @@ candidate VSIX as an Actions artifact. CI has no publishing credential.
 
 1. **test** runs on all three operating systems.
 2. **publish** waits for all of them, builds `extension.vsix` on Ubuntu, and
-   uses `HaaLeo/publish-vscode-extension` to publish that file to Marketplace.
+   uses `HaaLeo/publish-vscode-extension` to publish that same file first to
+   Visual Studio Marketplace and then to Open VSX.
 
 Both jobs check out the workflow event's exact commit. Actions are pinned,
-the `marketplace` environment still gates publication, and only the publishing
-action receives `VSCE_PAT`. Standard esbuild and bundled-license generation
-remain; there are no custom publication, archive-validation, or checksum-transfer
-scripts.
+and each publishing action receives only its corresponding Repository secret.
+Standard esbuild and bundled-license generation remain; there are no custom
+publication, archive-validation, or checksum-transfer scripts.
 
 Start this workflow by publishing a non-prerelease GitHub release or by choosing
 **Run workflow**. **A manual Publish run is a publication request, not a
 build-only preview.** Use the CI workflow if you only want a candidate package.
-Choose a ref permitted by the environment policy.
+Publication proceeds automatically after the three-platform test job succeeds.
 
 For GitHub releases, the tag must equal `v` plus `package.json.version`, currently
-`v0.1.0`. GitHub prereleases do not automatically publish to Marketplace. The
+`v0.1.0`. GitHub prereleases do not automatically publish to either registry. The
 Marketplace `preview` flag is independent of GitHub prerelease status.
 
-This workflow publishes only to Visual Studio Marketplace, not Open VSX. It
-does not create tags, commits, version bumps, or overwrite GitHub release assets.
+The workflow does not create tags, commits, version bumps, or overwrite GitHub
+release assets. The two registry uploads are not atomic: if the second fails,
+the first may already be published. Inspect both registries before retrying;
+an existing version is not silently skipped or overwritten.
 
 ## Local package
 

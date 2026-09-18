@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: wechat-ahp-marketplace
+  group: wechat-ahp-publish
   cancel-in-progress: false
 
 jobs:
@@ -36,7 +36,6 @@ jobs:
   publish:
     needs: test
     if: github.repository == 'formulahendry/vscode-wechat-ahp' && (github.event_name != 'release' || github.event.release.prerelease == false)
-    environment: marketplace
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -61,4 +60,10 @@ jobs:
         with:
           pat: ${{ secrets.VSCE_PAT }}
           registryUrl: https://marketplace.visualstudio.com
+          extensionFile: extension.vsix
+      - name: Publish to Open VSX Registry
+        uses: HaaLeo/publish-vscode-extension@4004fc217b5ac892b15a1c3cbe6458de97242dde # v2
+        with:
+          pat: ${{ secrets.OVSX_PAT }}
+          registryUrl: https://open-vsx.org
           extensionFile: extension.vsix
