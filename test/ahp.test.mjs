@@ -237,7 +237,14 @@ test('runtime reconnect recovers tracked response without mirroring old history 
   t.after(() => runtime.stop());
   assert.equal(runtime.start(), runtime.start());
   await runtime.start();
-  await waitFor(() => store.snapshot().sync?.turns.length === 1);
+  // Local tracking is write-ahead; it does not prove the Host has accepted the turn.
+  await waitFor(() => {
+    const state = store.snapshot();
+    return state.sync?.turns.length === 1
+      && state.messages[0]?.delivery === 'accepted'
+      && host.state.activeTurn !== undefined
+      && host.state.activeTurn.id === state.messages[0].turnId;
+  });
   host.disconnect();
   host.answer('answer completed during reconnect');
   await waitFor(() => resolutions >= 2 && phases.filter(item => item === 'Connected').length >= 2);
