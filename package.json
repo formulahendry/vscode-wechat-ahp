@@ -19,7 +19,7 @@
   },
   "icon": "media/icon.png",
   "preview": true,
-  "keywords": ["wechat", "weixin", "ahp", "agent", "chat", "copilot"],
+  "keywords": ["wechat", "weixin", "ahp", "agent", "copilot"],
   "galleryBanner": {
     "color": "#102a43",
     "theme": "dark"
@@ -31,8 +31,8 @@
     "node": ">=22"
   },
   "categories": [
-    "Machine Learning",
-    "Other"
+    "AI",
+    "Chat"
   ],
   "extensionKind": [
     "ui"
