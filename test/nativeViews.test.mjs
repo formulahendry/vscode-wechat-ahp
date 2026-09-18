@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { mkdir, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { bindingKey, Vault, SECRET_KEY } from '../.test-build/core.mjs';
+import { bindingKey, Vault, SECRET_KEY, withAbort } from '../.test-build/core.mjs';
 import { binding, credentials, fakeHost, fakeWeixin, message, MemorySecrets, waitFor, registryFixtureDirectories, registryEnvironment, mockOsForTests } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 
@@ -49,6 +49,8 @@ test('native views reuse scoped controller actions, stay read-only while browsin
   await Vault.create(secrets, credentials);
   let permitConnect = false;
   let pickCalls = 0;
+  let releaseSendResponse;
+  const sendResponseReady = new Promise(resolve => { releaseSendResponse = resolve; });
   const dispose = () => ({ dispose() {} });
   const stub = {
     StatusBarAlignment: { Left: 1 }, env: {},
@@ -81,6 +83,7 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     }
     if (endpoint.endsWith('/sendmessage')) {
       await weixin.api.send(body.msg, options.signal);
+      await withAbort(sendResponseReady, options.signal);
       return new Response('{}');
     }
     throw new Error('Unexpected non-fixture API operation');
@@ -145,6 +148,10 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     host.answer('PRIVATE-ASSISTANT-BODY');
     await waitFor(() => weixin.sends.length === 1);
     await waitFor(() => current().find(row => row.id === 'agent').value === 'Idle');
+    // Request arrival precedes acknowledgement and the journal/UI update.
+    assert.match(current().find(row => row.id === 'send').value, /^Sending/);
+    releaseSendResponse();
+    await waitFor(() => current().find(row => row.id === 'recent').children[0]?.value.startsWith('API accepted'));
     sessionsView.setVisible(false); connectionView.setVisible(false);
     assert.equal(contexts.get('wechatAHP.active'), true, 'hiding views must not stop sync');
     await commands.get('wechatAHP.copyDiagnostics')();
@@ -164,6 +171,7 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     assert.match(errors.at(-1), /no longer in the catalog/);
     assert.equal(secrets.data.has(SECRET_KEY), true);
   } finally {
+    releaseSendResponse();
     Module._load = originalLoad;
     await extension?.deactivate();
     for (const subscription of subscriptions) subscription.dispose();
