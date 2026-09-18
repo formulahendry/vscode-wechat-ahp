@@ -1,0 +1,189 @@
+{
+  "name": "wechat-ahp",
+  "displayName": "WeChat AHP",
+  "description": "Two-way plain text sync between one authorized WeChat owner and an explicitly selected existing local Agent Host chat.",
+  "version": "0.1.0",
+  "publisher": "formulahendry",
+  "author": {
+    "name": "Jun Han",
+    "url": "https://github.com/formulahendry"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/formulahendry/vscode-wechat-ahp.git"
+  },
+  "homepage": "https://github.com/formulahendry/vscode-wechat-ahp#readme",
+  "bugs": {
+    "url": "https://github.com/formulahendry/vscode-wechat-ahp/issues"
+  },
+  "icon": "media/icon.png",
+  "preview": true,
+  "keywords": ["wechat", "weixin", "ahp", "agent", "chat", "copilot"],
+  "galleryBanner": {
+    "color": "#102a43",
+    "theme": "dark"
+  },
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.110.0",
+    "node": ">=22"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "WeChat controls an existing agent chat. Open a trusted local workspace first."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Only desktop VS Code with a local workspace and local Agent Host is supported."
+    }
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "wechatAHP", "title": "WeChat AHP", "icon": "media/wechat-ahp.svg" }
+      ]
+    },
+    "views": {
+      "wechatAHP": [
+        { "id": "wechatAHP.sessions", "name": "Sessions", "icon": "media/wechat-ahp.svg" },
+        { "id": "wechatAHP.connection", "name": "Connection", "icon": "media/wechat-ahp.svg" }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "wechatAHP.sessions",
+        "contents": "Browse local Agent Hosts, then bind an existing chat. Browsing never starts WeChat sync.\n[Refresh Local Hosts](command:wechatAHP.refreshSessions)\n[Select Existing Chat](command:wechatAHP.selectChat)\nA compatible running Agent Host is required; ordinary chat windows may not expose AHP.",
+        "when": "isWorkspaceTrusted"
+      }
+    ],
+    "commands": [
+      {
+        "command": "wechatAHP.login",
+        "title": "WeChat AHP: Sign in with QR",
+        "icon": "$(account)",
+        "enablement": "isWorkspaceTrusted && !wechatAHP.active && !wechatAHP.busy"
+      },
+      {
+        "command": "wechatAHP.selectChat",
+        "title": "WeChat AHP: Select Existing Host / Session / Chat"
+      },
+      {
+        "command": "wechatAHP.connect",
+        "title": "WeChat AHP: Connect",
+        "icon": "$(plug)",
+        "enablement": "isWorkspaceTrusted && wechatAHP.bound && wechatAHP.signedIn && !wechatAHP.active && !wechatAHP.busy"
+      },
+      {
+        "command": "wechatAHP.disconnect",
+        "title": "WeChat AHP: Disconnect",
+        "icon": "$(debug-disconnect)",
+        "enablement": "wechatAHP.active || wechatAHP.busy"
+      },
+      {
+        "command": "wechatAHP.status",
+        "title": "WeChat AHP: Status / Diagnostics"
+      },
+      {
+        "command": "wechatAHP.clearPending",
+        "title": "WeChat AHP: Clear Pending Journal (No Resend)"
+      },
+      {
+        "command": "wechatAHP.logout",
+        "title": "WeChat AHP: Sign out and Clear Channel State"
+      },
+      { "command": "wechatAHP.focus", "title": "Show WeChat AHP", "category": "WeChat AHP" },
+      { "command": "wechatAHP.refreshSessions", "title": "Refresh Local Hosts", "category": "WeChat AHP", "icon": "$(refresh)" },
+      { "command": "wechatAHP.refreshNode", "title": "Refresh Children", "category": "WeChat AHP", "icon": "$(refresh)" },
+      { "command": "wechatAHP.loadMoreSessions", "title": "Load More Sessions", "category": "WeChat AHP" },
+      { "command": "wechatAHP.revealBinding", "title": "Reveal Bound Chat", "category": "WeChat AHP", "icon": "$(target)", "enablement": "wechatAHP.bound" },
+      { "command": "wechatAHP.pingHost", "title": "Check AHP Connection", "category": "WeChat AHP", "icon": "$(pulse)" },
+      { "command": "wechatAHP.nodeDetails", "title": "View AHP Details", "category": "WeChat AHP", "icon": "$(info)" },
+      { "command": "wechatAHP.copyResource", "title": "Copy Resource URI", "category": "WeChat AHP", "icon": "$(copy)" },
+      { "command": "wechatAHP.bindChat", "title": "Bind Chat", "category": "WeChat AHP", "icon": "$(pin)", "enablement": "isWorkspaceTrusted && !wechatAHP.active && !wechatAHP.busy" },
+      { "command": "wechatAHP.bindAndConnect", "title": "Bind and Connect", "category": "WeChat AHP", "icon": "$(plug)", "enablement": "isWorkspaceTrusted && wechatAHP.signedIn && !wechatAHP.active && !wechatAHP.busy" },
+      { "command": "wechatAHP.diagnostics", "title": "Show Diagnostics", "category": "WeChat AHP", "icon": "$(output)" },
+      { "command": "wechatAHP.copyDiagnostics", "title": "Copy Redacted Diagnostics", "category": "WeChat AHP", "icon": "$(copy)" },
+      { "command": "wechatAHP.recentDeliveries", "title": "Show Recent Deliveries", "category": "WeChat AHP", "icon": "$(history)" }
+    ],
+    "menus": {
+      "view/title": [
+        { "command": "wechatAHP.refreshSessions", "when": "view == wechatAHP.sessions", "group": "navigation@1" },
+        { "command": "wechatAHP.revealBinding", "when": "view == wechatAHP.sessions && wechatAHP.bound", "group": "navigation@2" },
+        { "command": "wechatAHP.selectChat", "when": "view == wechatAHP.sessions", "group": "1_selection" },
+        { "command": "wechatAHP.login", "when": "view == wechatAHP.connection && !wechatAHP.signedIn && !wechatAHP.active", "group": "navigation@1" },
+        { "command": "wechatAHP.connect", "when": "view == wechatAHP.connection && wechatAHP.bound && wechatAHP.signedIn && !wechatAHP.active && !wechatAHP.busy", "group": "navigation@1" },
+        { "command": "wechatAHP.disconnect", "when": "view == wechatAHP.connection && (wechatAHP.active || wechatAHP.busy)", "group": "navigation@1" },
+        { "command": "wechatAHP.diagnostics", "when": "view == wechatAHP.connection", "group": "navigation@2" },
+        { "command": "wechatAHP.login", "when": "view == wechatAHP.connection && wechatAHP.signedIn", "group": "1_account" },
+        { "command": "wechatAHP.logout", "when": "view == wechatAHP.connection && !wechatAHP.active && !wechatAHP.busy", "group": "1_account" },
+        { "command": "wechatAHP.recentDeliveries", "when": "view == wechatAHP.connection", "group": "2_diagnostics" },
+        { "command": "wechatAHP.copyDiagnostics", "when": "view == wechatAHP.connection", "group": "2_diagnostics" },
+        { "command": "wechatAHP.clearPending", "when": "view == wechatAHP.connection && !wechatAHP.active && !wechatAHP.busy", "group": "3_recovery" }
+      ],
+      "view/item/context": [
+        { "command": "wechatAHP.refreshNode", "when": "view == wechatAHP.sessions && (viewItem =~ /^wechatHost/ || viewItem == wechatSession)", "group": "inline@1" },
+        { "command": "wechatAHP.pingHost", "when": "view == wechatAHP.sessions && viewItem =~ /^wechatHost/", "group": "inline@2" },
+        { "command": "wechatAHP.loadMoreSessions", "when": "view == wechatAHP.sessions && viewItem == wechatHostMore", "group": "1_catalog" },
+        { "command": "wechatAHP.nodeDetails", "when": "view == wechatAHP.sessions && viewItem != wechatNotice", "group": "2_details" },
+        { "command": "wechatAHP.copyResource", "when": "view == wechatAHP.sessions && (viewItem == wechatSession || viewItem =~ /^wechatChat/)", "group": "2_details" },
+        { "command": "wechatAHP.bindChat", "when": "view == wechatAHP.sessions && (viewItem == wechatChat || viewItem == wechatChatBound) && !wechatAHP.active && !wechatAHP.busy", "group": "inline@1" },
+        { "command": "wechatAHP.bindAndConnect", "when": "view == wechatAHP.sessions && (viewItem == wechatChat || viewItem == wechatChatBound) && !wechatAHP.active && !wechatAHP.busy", "group": "inline@2" },
+        { "command": "wechatAHP.disconnect", "when": "view == wechatAHP.sessions && viewItem == wechatChatBound && wechatAHP.active", "group": "inline@1" },
+        { "command": "wechatAHP.revealBinding", "when": "view == wechatAHP.connection && viewItem == wechatBindingStatus", "group": "inline@1" },
+        { "command": "wechatAHP.recentDeliveries", "when": "view == wechatAHP.connection && viewItem == wechatQueueStatus", "group": "1_diagnostics" },
+        { "command": "wechatAHP.clearPending", "when": "view == wechatAHP.connection && viewItem == wechatQueueStatus && !wechatAHP.active && !wechatAHP.busy", "group": "2_recovery" },
+        { "command": "wechatAHP.diagnostics", "when": "view == wechatAHP.connection", "group": "1_diagnostics" }
+      ],
+      "commandPalette": [
+        { "command": "wechatAHP.refreshNode", "when": "false" },
+        { "command": "wechatAHP.loadMoreSessions", "when": "false" },
+        { "command": "wechatAHP.pingHost", "when": "false" },
+        { "command": "wechatAHP.nodeDetails", "when": "false" },
+        { "command": "wechatAHP.copyResource", "when": "false" },
+        { "command": "wechatAHP.bindChat", "when": "false" },
+        { "command": "wechatAHP.bindAndConnect", "when": "false" }
+      ]
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "compile": "npm run typecheck && node esbuild.mjs",
+    "watch:tsc": "tsc --noEmit --watch --preserveWatchOutput",
+    "watch:esbuild": "node esbuild.mjs --watch",
+    "build": "node esbuild.mjs --production",
+    "build:tests": "node scripts/build-tests.mjs",
+    "test": "npm run build && npm run build:tests && node --test --test-timeout=15000 --test-concurrency=1 test/*.test.mjs",
+    "vscode:prepublish": "npm run typecheck && npm run build",
+    "package": "vsce package --no-dependencies --githubBranch main --out wechat-ahp-0.1.0.vsix"
+  },
+  "dependencies": {
+    "@microsoft/agent-host-protocol": "0.9.0",
+    "lossless-json": "4.3.1",
+    "qrcode": "1.5.4",
+    "ws": "8.21.3",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/vscode": "1.110.0",
+    "@types/ws": "^8.18.1",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "^5.9.3"
+  }
+}

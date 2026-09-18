@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.test-build/
+*.vsix
+*.log
+.env
+.env.*
+!.env.example
+.npmrc
+.DS_Store
+Thumbs.db

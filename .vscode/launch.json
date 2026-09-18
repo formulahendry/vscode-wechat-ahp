@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run WeChat AHP Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--new-window",
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}"
+      ],
+      "outFiles": [
+        "${workspaceFolder}${pathSeparator}dist${pathSeparator}extension.cjs"
+      ],
+      "sourceMaps": true,
+      "preLaunchTask": "${defaultBuildTask}"
+    }
+  ]
+}
