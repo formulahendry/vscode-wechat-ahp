@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ClientClosedError, RpcError, RpcTimeoutError, TransportError } from '@microsoft/agent-host-protocol/client';
 import {
-  Bridge, HostConnection, Inbox, bindingSchema, diagnostic, parseBinding, selectionFailure,
+  Bridge, HostConnection, Inbox, VERSION, bindingSchema, diagnostic, parseBinding, selectionFailure,
 } from '../.test-build/core.mjs';
 import { binding, fakeHost, fakeWeixin, message, MemorySecrets, signal, vault, waitFor, registryFixtureDirectories, registryEnvironment, mockOsForTests } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
@@ -146,7 +146,7 @@ test('bundled Select Existing command saves the actual catalog URIs without Weix
     Module._load = originalLoad;
     extension.activate({
       subscriptions: [], secrets,
-      extension: { packageJSON: { version: '0.1.0' } },
+      extension: { packageJSON: { version: VERSION } },
       globalState: { get: key => saved.get(key), update: async (key, value) => saved.set(key, value) },
     });
     await commands.get('wechatAHP.selectChat')();

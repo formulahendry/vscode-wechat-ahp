@@ -2,7 +2,7 @@
   "name": "wechat-ahp",
   "displayName": "WeChat AHP",
   "description": "Two-way plain text sync between one authorized WeChat owner and an explicitly selected existing local Agent Host chat.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "formulahendry",
   "author": {
     "name": "Jun Han",
@@ -168,7 +168,7 @@
     "build:tests": "node scripts/build-tests.mjs",
     "test": "npm run build && npm run build:tests && node --test --test-timeout=15000 --test-concurrency=1 test/*.test.mjs",
     "vscode:prepublish": "npm run typecheck && npm run build",
-    "package": "vsce package --no-dependencies --githubBranch main --out wechat-ahp-0.1.0.vsix"
+    "package": "vsce package --no-dependencies --githubBranch main"
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "0.9.0",

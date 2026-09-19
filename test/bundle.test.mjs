@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire, builtinModules } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { VERSION } from '../.test-build/core.mjs';
 import { credentials, MemorySecrets, mockOsForTests } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 
@@ -43,7 +44,7 @@ test('bundled entry uses only vscode/builtins, rejects untrusted workspace and r
   finally { Module._load = original; }
   const context = {
     subscriptions: [], secrets,
-    extension: { packageJSON: { version: '0.1.0' } },
+    extension: { packageJSON: { version: VERSION } },
     globalState: { get: key => globals.get(key), update: async (key, value) => globals.set(key, value) },
   };
   extension.activate(context);

@@ -4,14 +4,14 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { bindingKey, Vault, SECRET_KEY, withAbort } from '../.test-build/core.mjs';
+import { bindingKey, Vault, SECRET_KEY, VERSION, withAbort } from '../.test-build/core.mjs';
 import { binding, credentials, fakeHost, fakeWeixin, message, MemorySecrets, waitFor, registryFixtureDirectories, registryEnvironment } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 import { fakeTelemetry, loadTelemetryExtension } from './telemetryHelpers.mjs';
 
-test('manifest contributes two native English views and scoped actions without changing the fixed version', async () => {
+test('manifest contributes two native English views and scoped actions matching the runtime version', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.1.0');
+  assert.equal(manifest.version, VERSION);
   assert.deepEqual(manifest.contributes.views.wechatAHP.map(view => view.name), ['Sessions', 'Connection']);
   assert.equal(manifest.contributes.viewsContainers.activitybar[0].icon, 'media/wechat-ahp.svg');
   for (const command of manifest.contributes.commands) assert.match(command.title, /^[\x20-\x7e]+$/);
@@ -89,7 +89,7 @@ test('native views reuse scoped controller actions, stay read-only while browsin
   try {
     extension = loadTelemetryExtension(stub, root, telemetry);
     extension.activate({
-      subscriptions, secrets, extensionMode: stub.ExtensionMode.Production, extension: { packageJSON: { version: '0.1.0' } },
+      subscriptions, secrets, extensionMode: stub.ExtensionMode.Production, extension: { packageJSON: { version: VERSION } },
       globalState: { get: key => globals.get(key), update: async (key, value) => globals.set(key, value) },
     });
     assert.equal(views.size, 2);

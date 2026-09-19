@@ -5,7 +5,7 @@
 | Publisher | `formulahendry` |
 | Extension | `formulahendry.wechat-ahp` |
 | Repository | `formulahendry/vscode-wechat-ahp` |
-| Current version | `0.1.0` |
+| Current version | `0.1.1` |
 | Package | Universal desktop VSIX for Windows, macOS, and Linux |
 
 Do not bump versions, commit, tag, push, or publish without the maintainer's
@@ -59,7 +59,7 @@ build-only preview.** Use the CI workflow if you only want a candidate package.
 Publication proceeds automatically after the three-platform test job succeeds.
 
 For GitHub releases, the tag must equal `v` plus `package.json.version`, currently
-`v0.1.0`. GitHub prereleases do not automatically publish to either registry. The
+`v0.1.1`. GitHub prereleases do not automatically publish to either registry. The
 Marketplace `preview` flag is independent of GitHub prerelease status.
 
 The workflow does not create tags, commits, version bumps, or overwrite GitHub
@@ -78,12 +78,13 @@ npm test
 npm run package
 ```
 
-The output is `wechat-ahp-0.1.0.vsix`. Packaging uses the existing `vsce` tool and
-its built-in validation; no publishing credential is needed.
+`vsce` names the output `<name>-<version>.vsix` using `package.json`; no explicit
+output filename is needed. Packaging uses the existing `vsce` tool and its
+built-in validation; no publishing credential is needed.
 
-Keep version **0.1.0** until the maintainer explicitly asks to change it. After
-0.1.0 has been published, Marketplace will not accept a different package under
-the same version.
+Change the version only when the maintainer explicitly requests it. Once a
+version has been published, Marketplace will not accept a different package
+under the same version.
 
 ## Before publishing
 

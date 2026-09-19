@@ -1,23 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { VERSION } from '../.test-build/core.mjs';
 
-test('release metadata stays at 0.1.0 with an end-user English README and universal packaging', async () => {
+test('release metadata stays at 0.1.1 with an end-user English README and universal packaging', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   const lock = JSON.parse(await readFile(new URL('../package-lock.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.version, '0.1.0');
+  assert.equal(manifest.version, '0.1.1');
+  assert.equal(VERSION, manifest.version);
   assert.equal(lock.version, manifest.version);
   assert.equal(lock.packages[''].version, manifest.version);
   assert.equal(manifest.publisher, 'formulahendry');
   assert.equal(manifest.license, 'SEE LICENSE IN LICENSE');
   assert.match(manifest.scripts.package, /^vsce package --no-dependencies/);
+  assert.doesNotMatch(manifest.scripts.package, /(?:--out|-o)(?:[=\s]|$)/);
   assert.doesNotMatch(manifest.scripts.package, /--target|scripts\/|skip-license|allow-package/);
   const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8');
   assert.doesNotMatch(readme, /\p{Script=Han}|local-wechat-ahp|C:\\code\\|only.{0,40}VSIX/iu);
   for (const image of ['screenshot', 'chat-vscode', 'chat-wechat']) {
     assert.ok(readme.includes(`](media/${image}.png)`));
   }
-  assert.ok((await readFile(new URL('../CHANGELOG.md', import.meta.url), 'utf8')).includes('## [0.1.0]'));
+  const changelog = await readFile(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  assert.ok(changelog.includes(`## [${manifest.version}]`));
+  assert.ok(changelog.includes('## [0.1.0]'));
   assert.match(await readFile(new URL('../LICENSE', import.meta.url), 'utf8'), /^MIT License/);
 });
 

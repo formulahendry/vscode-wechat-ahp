@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { hash, withAbort } from '../.test-build/core.mjs';
+import { hash, VERSION, withAbort } from '../.test-build/core.mjs';
 import { binding, credentials, MemorySecrets, waitFor } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 import { fakeTelemetry, loadTelemetryExtension } from './telemetryHelpers.mjs';
@@ -39,7 +39,7 @@ function harness() {
   const extension = loadTelemetryExtension(stub, resolve('.test-build', `telemetry-commands-${process.pid}`), fake);
   const context = {
     subscriptions: [], secrets, extensionMode: stub.ExtensionMode.Production,
-    extension: { packageJSON: { version: '0.1.0' } },
+    extension: { packageJSON: { version: VERSION } },
     globalState: { get: key => globals.get(key), update: async (key, value) => globals.set(key, value) },
   };
   return {

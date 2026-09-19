@@ -128,7 +128,7 @@ private state may not be readable by an older development build.
 
 ## Version and change policy
 
-Keep the extension at **0.1.0** unless the maintainer explicitly requests a
-version change. Code changes do not automatically bump the version.
+Change the extension version only when the maintainer explicitly requests it.
+Code changes do not automatically bump the version.
 Do not create a commit, tag, push, or publish without the maintainer's explicit
 authorization. See [Releasing](RELEASING.md) for the Marketplace workflow.
