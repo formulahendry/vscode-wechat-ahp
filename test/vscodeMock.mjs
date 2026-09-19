@@ -1,4 +1,5 @@
 export function addNativeViewApi(stub) {
+  stub.ExtensionMode = { Production: 1, Development: 2, Test: 3 };
   const views = new Map();
   const contexts = new Map();
   const clipboard = [];
@@ -8,6 +9,11 @@ export function addNativeViewApi(stub) {
     fire(value) { for (const listener of this.listeners) listener(value); }
     dispose() { this.listeners.clear(); }
   };
+  stub.env.createTelemetryLogger = () => ({
+    isUsageEnabled: false, isErrorsEnabled: false,
+    onDidChangeEnableStates: () => ({ dispose() {} }),
+    logUsage() {}, logError() {}, dispose() {},
+  });
   stub.TreeItem = class {
     constructor(label, collapsibleState) { this.label = label; this.collapsibleState = collapsibleState; }
   };

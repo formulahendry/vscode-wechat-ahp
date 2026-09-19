@@ -19,6 +19,7 @@ export interface RuntimeOptions {
   log(message: string): void;
   status(status: string): void;
   failed(message: string): void;
+  terminalError?(error: unknown): void;
   health?(update: RuntimeHealth): void;
   wait?: typeof pause;
   ackTimeout?: number;
@@ -41,13 +42,23 @@ export class ChannelRuntime {
     let rejected!: (error: unknown) => void;
     this.starting = new Promise((resolve, reject) => { ready = resolve; rejected = reject; });
     let started = false;
+    let terminalReported = false;
+    const reportTerminal = (error: unknown) => {
+      if (started && !terminalReported) {
+        terminalReported = true;
+        this.options.terminalError?.(error);
+      }
+    };
     this.running = this.run(() => { started = true; ready(); }).catch(error => {
       rejected(error);
       if (error instanceof SafeError && error.kind === 'auth') this.options.health?.({ account: 'Sign-in required' });
-      if (started && !this.abort.signal.aborted) this.options.failed(diagnostic(error));
+      if (started && !this.abort.signal.aborted) {
+        reportTerminal(error);
+        this.options.failed(diagnostic(error));
+      }
     }).finally(async () => {
       try { await this.options.vault.invalidateReplies(bindingKey(this.options.binding)); }
-      catch (error) { this.options.failed(diagnostic(error)); }
+      catch (error) { reportTerminal(error); this.options.failed(diagnostic(error)); }
       this.options.status('Disconnected');
       this.options.health?.({ receive: 'Stopped', agent: 'Unknown' });
       rejected(new SafeError('Connection cancelled.'));

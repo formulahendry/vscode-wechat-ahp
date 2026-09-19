@@ -15,6 +15,7 @@ test('bundled entry uses only vscode/builtins, rejects untrusted workspace and r
   const globals = new Map();
   const secrets = new MemorySecrets();
   const disposable = () => ({ dispose() {} });
+  let telemetryLoggers = 0;
   const stub = {
     StatusBarAlignment: { Left: 1 }, ViewColumn: { Active: 1 }, env: { remoteName: undefined },
     window: {
@@ -26,6 +27,8 @@ test('bundled entry uses only vscode/builtins, rejects untrusted workspace and r
     commands: { registerCommand: (id, callback) => { commands.set(id, callback); return disposable(); } },
   };
   addNativeViewApi(stub);
+  const createTelemetryLogger = stub.env.createTelemetryLogger;
+  stub.env.createTelemetryLogger = (...args) => { telemetryLoggers++; return createTelemetryLogger(...args); };
   const externals = new Set();
   let extension;
   Module._load = function (request, parent, isMain) {
@@ -45,6 +48,7 @@ test('bundled entry uses only vscode/builtins, rejects untrusted workspace and r
   };
   extension.activate(context);
   assert.equal(commands.size, 20);
+  assert.equal(telemetryLoggers, 1);
   assert.equal(secrets.writes.length, 0);
   assert.equal(globals.size, 0);
   await commands.get('wechatAHP.connect')();
@@ -87,6 +91,7 @@ test('bundled entry uses only vscode/builtins, rejects untrusted workspace and r
     try {
       extension.activate(context);
       await commands.get('wechatAHP.login')();
+      assert.equal(telemetryLoggers, 2);
       assert.equal(calls.length, 2);
       assert.equal(secrets.state().credentials.ownerId, credentials.ownerId);
       assert.equal(globals.size, 0);

@@ -4,6 +4,7 @@
 !CHANGELOG.md
 !LICENSE
 !THIRD_PARTY_NOTICES.md
+!telemetry.json
 !dist/extension.cjs
 !dist/THIRD_PARTY_LICENSES.txt
 !media/wechat-ahp.svg

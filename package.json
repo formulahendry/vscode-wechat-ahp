@@ -172,6 +172,7 @@
   },
   "dependencies": {
     "@microsoft/agent-host-protocol": "0.9.0",
+    "@vscode/extension-telemetry": "1.5.2",
     "lossless-json": "4.3.1",
     "qrcode": "1.5.4",
     "ws": "8.21.3",

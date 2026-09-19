@@ -34,6 +34,13 @@ package so development output cannot overwrite production output.
 The esbuild problem matcher is embedded in `.vscode\tasks.json`; no additional
 matcher extension is needed.
 
+Telemetry uses the same official SDK in production, F5/development, and test
+extension modes, respecting VS Code's effective global telemetry setting. F5
+can send events to the configured Application Insights resource. The official
+VS Code extension test host forces logging-only mode; this extension does not
+bypass it. Repository Node tests use fake reporters or an in-memory SDK fetcher
+and do not contact the live telemetry resource.
+
 F5 never authorizes a real channel automatically. Use explicit sign-in, binding,
 and connection consent. Disconnect another instance before using the same
 account, and do not run the separate MCP PoC against the same bot concurrently.

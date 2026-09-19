@@ -15,6 +15,7 @@ import { WeixinApi } from './weixin.js';
 import { initialChannelState, privateSummary, sendStatus, type ChannelState } from './channelState.js';
 import { SessionCatalog, type CatalogChat } from './sessionCatalog.js';
 import { assertLocalDesktop, isLocalDesktop } from './platform.js';
+import type { CommandName, CommandTelemetry, Telemetry } from './telemetry.js';
 
 const BINDING_KEY = 'wechat-ahp.binding.v1';
 export class ChannelController {
@@ -35,7 +36,7 @@ export class ChannelController {
   private disposed = false;
   private readonly contextValues = new Map<string, boolean>();
 
-  constructor(private readonly context: vscode.ExtensionContext) {
+  constructor(private readonly context: vscode.ExtensionContext, private readonly telemetry: Telemetry) {
     this.catalog = new SessionCatalog({
       assertAllowed: () => { this.trusted(); },
       roots: () => this.roots(), log: message => this.log(message),
@@ -44,17 +45,17 @@ export class ChannelController {
     this.setStatus('Disconnected');
     this.status.show();
     context.subscriptions.push(this.output, this.status, this.changed);
-    const commands: Record<string, () => Promise<unknown>> = {
-      login: () => this.exclusive(signal => this.signIn(signal)),
+    const commands = {
+      login: (attempt: CommandTelemetry) => this.exclusive(signal => this.signIn(signal, attempt), attempt),
       selectChat: () => this.exclusive(signal => this.selectChat(signal)),
-      connect: () => this.exclusive(signal => this.connect(signal)),
+      connect: (attempt: CommandTelemetry) => this.exclusive(signal => this.connect(signal, attempt), attempt),
       disconnect: () => this.stop(),
       status: () => this.showStatus(),
       logout: () => this.exclusive(signal => this.logout(signal)),
       clearPending: () => this.exclusive(signal => this.clearPending(signal)),
-    };
-    for (const [name, action] of Object.entries(commands)) {
-      this.registerCommand(name, action);
+    } satisfies Partial<Record<CommandName, (attempt: CommandTelemetry) => Promise<unknown>>>;
+    for (const name of Object.keys(commands) as (keyof typeof commands)[]) {
+      this.registerCommand(name, (_argument, attempt) => commands[name](attempt));
     }
     context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(() => {
       this.catalog.refresh();
@@ -66,10 +67,11 @@ export class ChannelController {
     }));
   }
 
-  registerCommand(name: string, action: (argument?: unknown) => Promise<unknown>): void {
+  registerCommand(name: CommandName, action: (argument: unknown, attempt: CommandTelemetry) => Promise<unknown>): void {
     this.context.subscriptions.push(vscode.commands.registerCommand(`wechatAHP.${name}`, async (argument?: unknown) => {
-      try { await action(argument); }
-      catch (error) { this.reportError(error); }
+      const attempt = this.telemetry.command(name);
+      try { await action(argument, attempt); }
+      catch (error) { attempt.fail(error); this.reportError(error); }
       finally {
         try { await this.refreshState(); }
         catch (error) { this.reportError(error); }
@@ -172,7 +174,7 @@ export class ChannelController {
     return parseBinding(value);
   }
 
-  private async exclusive(work: (signal: AbortSignal) => Promise<unknown>): Promise<void> {
+  private async exclusive(work: (signal: AbortSignal) => Promise<unknown>, attempt?: CommandTelemetry): Promise<void> {
     if (this.operation) throw new SafeError('Another WeChat AHP operation is active. Use Disconnect to cancel it.');
     const operation = new AbortController();
     this.operation = operation;
@@ -182,7 +184,10 @@ export class ChannelController {
     this.operationDone = done;
     try { await work(operation.signal); }
     catch (error) {
-      if (operation.signal.aborted) this.log('Operation cancelled; no automatic retry.');
+      if (operation.signal.aborted) {
+        attempt?.finish('cancelled');
+        this.log('Operation cancelled; no automatic retry.');
+      }
       else throw error;
     } finally {
       if (this.operation === operation) this.operation = undefined;
@@ -211,15 +216,16 @@ export class ChannelController {
     finally { await lock.close(); }
   }
 
-  private async signIn(signal: AbortSignal): Promise<void> {
+  private async signIn(signal: AbortSignal, attempt: CommandTelemetry): Promise<void> {
     this.trusted();
     await this.idleLock(async () => {
       const existing = await Vault.load(this.context.secrets);
       if (await vscode.window.showWarningMessage(
         'Sign in to Weixin using your own account. Only the QR-confirmed owner can control the selected agent chat. No polling starts yet.',
         { modal: true }, 'Show QR',
-      ) !== 'Show QR') return;
+      ) !== 'Show QR') { attempt.finish('cancelled'); return; }
       signal.throwIfAborted();
+      attempt.start();
       const cancel = new AbortController();
       const lifetime = AbortSignal.any([signal, cancel.signal]);
       const panel = vscode.window.createWebviewPanel('wechatAHP.login', 'WeChat AHP: Scan QR', vscode.ViewColumn.Active, {
@@ -240,7 +246,7 @@ export class ChannelController {
                 password: true, ignoreFocusOut: true,
                 validateInput: value => /^\d{1,12}$/.test(value) ? undefined : 'Use 1-12 digits.',
               }, source.token);
-              if (code === undefined) throw new SafeError('Verification cancelled.');
+              if (code === undefined) { cancel.abort(); throw new SafeError('Verification cancelled.'); }
               return code;
             } finally { current.removeEventListener('abort', abort); source.dispose(); }
           },
@@ -254,11 +260,15 @@ export class ChannelController {
           }
           await existing.update(next => { next.credentials = credentials; });
         } else await Vault.create(this.context.secrets, credentials);
+        attempt.finish('success');
         this.publish({ account: 'Signed in' });
         this.log('QR-confirmed owner saved to VS Code SecretStorage.');
         void vscode.window.showInformationMessage('WeChat AHP: Signed in. Select an existing chat, then Connect.');
       } catch (error) {
-        if (lifetime.aborted) this.log('QR login cancelled or expired; existing credentials retained.');
+        if (lifetime.aborted) {
+          attempt.finish('cancelled');
+          this.log('QR login cancelled or expired; existing credentials retained.');
+        }
         else throw error;
       } finally {
         disposed.dispose();
@@ -267,12 +277,13 @@ export class ChannelController {
     });
   }
 
-  async bindChat(node: CatalogChat, connectAfter: boolean): Promise<void> {
+  async bindChat(node: CatalogChat, connectAfter: boolean, attempt: CommandTelemetry): Promise<void> {
     if (!node.eligible) throw new SafeError(node.unavailableReason ?? 'This chat cannot be bound.');
     await this.exclusive(async signal => {
       const saved = await this.selectChat(signal, node);
-      if (saved && connectAfter) await this.connect(signal);
-    });
+      if (saved && connectAfter) await this.connect(signal, attempt);
+      else if (connectAfter) attempt.finish('cancelled');
+    }, attempt);
   }
 
   private async selectChat(signal: AbortSignal, target?: CatalogChat): Promise<boolean> {
@@ -355,7 +366,7 @@ export class ChannelController {
     }
   }
 
-  private async connect(signal: AbortSignal): Promise<void> {
+  private async connect(signal: AbortSignal, attempt: CommandTelemetry): Promise<void> {
     if (this.runtime) { this.log('Channel is already connected/connecting.'); return; }
     const workspace = this.trusted();
     const binding = this.binding();
@@ -364,8 +375,9 @@ export class ChannelController {
     if (await vscode.window.showWarningMessage(
       `Enable TWO-WAY TEXT SYNC with your QR-confirmed WeChat owner?\n${binding.hostId}\n${binding.session}\n${binding.chat}\nNew VS Code user messages and completed assistant text from THIS chat will automatically be sent to WeChat. WeChat text enters this chat unchanged. No history, reasoning, tools, attachments or other chats are copied. Tool approvals stay in VS Code. A message from WeChat is needed to establish reply context.`,
       { modal: true }, 'Connect',
-    ) !== 'Connect') return;
+    ) !== 'Connect') { attempt.finish('cancelled'); return; }
     signal.throwIfAborted();
+    attempt.start();
     this.lock = await OwnerLock.acquire();
     try {
       const vault = await Vault.load(this.context.secrets);
@@ -382,6 +394,7 @@ export class ChannelController {
         assertScope: session => assertSessionScope(session, binding.chat, this.roots()),
         log: message => this.log(message), status: phase => this.setStatus(phase),
         health: update => this.publish(update),
+        terminalError: error => this.telemetry.error('wechatAHP.channel.error', error),
         failed: message => {
           this.log(message);
           this.publish({ lastError: message });
@@ -406,6 +419,7 @@ export class ChannelController {
       void this.releasing.catch(error => this.log(diagnostic(error)));
       if (signal.aborted) cancel();
       await start;
+      attempt.finish('success');
     } catch (error) {
       await this.shutdownChannel();
       throw error;

@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Basic usage and reliability telemetry through the official VS Code telemetry
+  SDK in all extension modes, including F5/development and tests, respecting the
+  global telemetry level, live changes, and host-enforced logging-only mode.
+- Command-ID events, sign-in/connection outcomes and durations, and allowlisted
+  error categories. No chat content, account/binding identifiers, per-message
+  metrics, or raw errors are collected.
+- A packaged telemetry declaration and privacy documentation disclosing the
+  SDK's standard pseudonymous machine/session identifiers.
+
 ## [0.1.0] - 2026-09-18
 
 Initial preview release for native local desktop VS Code on Windows, macOS, and Linux.

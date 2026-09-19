@@ -35,10 +35,10 @@ export function registerViews(context: vscode.ExtensionContext, controller: Chan
     void vscode.window.showInformationMessage('Agent Host responded to AHP ping. WeChat sync was not started.');
   });
   for (const [command, connectAfter] of [['bindChat', false], ['bindAndConnect', true]] as const) {
-    controller.registerCommand(command, async argument => {
+    controller.registerCommand(command, async (argument, attempt) => {
       const selected = node(argument);
       if (selected.kind !== 'chat') throw new SafeError('Select an existing chat to bind.');
-      await controller.bindChat(selected, connectAfter);
+      await controller.bindChat(selected, connectAfter, attempt);
     });
   }
   controller.registerCommand('revealBinding', async () => {

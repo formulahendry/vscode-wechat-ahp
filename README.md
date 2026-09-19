@@ -181,8 +181,9 @@ channel, not the agent's ongoing work.
 - Only new text in the bound chat is mirrored. Do not enter text there that you
   do not want sent to WeChat. Known transport credentials are blocked, but this
   extension is **not a general data-loss-prevention system**.
-- The extension does not add analytics or telemetry collection. Your selected
-  agent provider and Weixin have their own data-processing policies.
+- Basic usage and categorized error telemetry follows VS Code's global
+  telemetry controls; see **Telemetry** below. Your selected agent provider
+  and Weixin have their own data-processing policies.
 - At most one instance of this extension can own the local channel for an OS
   user at a time, including across windows and profiles.
 
@@ -197,6 +198,46 @@ the same bot from multiple machines at once.
 Before sharing diagnostics or screenshots, review session URIs, account aliases,
 workspace paths, chat text, and other applications' UI. Encoded identifiers are
 not anonymized merely because they are not readable at a glance.
+
+### Telemetry
+
+The extension uses Microsoft's `@vscode/extension-telemetry` to send basic
+usage and reliability events to the extension publisher's Azure Application
+Insights resource. The same telemetry path is enabled in production, F5/development,
+and test extension modes, subject to VS Code's global controls. VS Code's official
+extension test host enforces logging-only mode, so events there are logged rather
+than transmitted; this extension does not bypass that host restriction.
+
+Events cover extension activation, explicitly invoked command IDs, QR sign-in
+and connection outcomes (`success`, `cancelled`, or `failed`), operation
+durations, and errors reduced to fixed categories such as `auth` or `transport`.
+Connection success means the local channel is ready, not that a WeChat message
+was delivered. There are no per-message metrics or polling/retry events.
+
+**Never collected by this extension's telemetry:** message text, prompts,
+responses, reasoning, tool data, account IDs or aliases, AHP resource IDs,
+endpoint addresses, paths, repository names, QR codes, verification codes,
+credentials, private journal contents, or error messages/stacks.
+
+The official SDK adds standard extension/VS Code versions, OS, architecture,
+product/UI metadata, normalized remote kind, and VS Code-generated machine and
+session/device identifiers (also used by the Application Insights envelope). These
+identifiers are **pseudonymous, not completely anonymous**. This extension does
+not add its own user IDs or link them to WeChat accounts or AHP bindings.
+
+Control collection with VS Code's **Telemetry: Telemetry Level** setting
+(`telemetry.telemetryLevel`); no separate extension setting is needed:
+
+| Effective level | Extension events |
+|---|---|
+| `all` | Basic usage and categorized errors |
+| `error` | Categorized errors only |
+| `crash` or `off` | None |
+
+Changes take effect while the extension is running. Events generated while
+disabled are not queued for later replay; data already sent cannot be withdrawn.
+The packaged [telemetry declaration](telemetry.json) lists the events and fields
+and is included in VS Code's `code --telemetry` output.
 
 ## Delivery and recovery
 

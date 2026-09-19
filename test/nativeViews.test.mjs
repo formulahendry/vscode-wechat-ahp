@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { createRequire } from 'node:module';
 import { mkdir, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { bindingKey, Vault, SECRET_KEY, withAbort } from '../.test-build/core.mjs';
-import { binding, credentials, fakeHost, fakeWeixin, message, MemorySecrets, waitFor, registryFixtureDirectories, registryEnvironment, mockOsForTests } from './helpers.mjs';
+import { binding, credentials, fakeHost, fakeWeixin, message, MemorySecrets, waitFor, registryFixtureDirectories, registryEnvironment } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
+import { fakeTelemetry, loadTelemetryExtension } from './telemetryHelpers.mjs';
 
 test('manifest contributes two native English views and scoped actions without changing the fixed version', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
@@ -37,9 +37,7 @@ test('native views reuse scoped controller actions, stay read-only while browsin
   }), { mode: 0o600 });
   const restoreEnvironment = registryEnvironment(root);
   const originalFetch = globalThis.fetch;
-  const require = createRequire(import.meta.url);
-  const Module = require('node:module');
-  const originalLoad = Module._load;
+  const telemetry = fakeTelemetry();
   const commands = new Map();
   const logs = [];
   const errors = [];
@@ -89,15 +87,9 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     throw new Error('Unexpected non-fixture API operation');
   };
   try {
-    Module._load = function (request, parent, isMain) {
-      if (request === 'vscode') return stub;
-      if (request === 'node:os') return mockOsForTests(originalLoad.call(this, request, parent, isMain), root);
-      return originalLoad.call(this, request, parent, isMain);
-    };
-    extension = require('../dist/extension.cjs');
-    Module._load = originalLoad;
+    extension = loadTelemetryExtension(stub, root, telemetry);
     extension.activate({
-      subscriptions, secrets, extension: { packageJSON: { version: '0.1.0' } },
+      subscriptions, secrets, extensionMode: stub.ExtensionMode.Production, extension: { packageJSON: { version: '0.1.0' } },
       globalState: { get: key => globals.get(key), update: async (key, value) => globals.set(key, value) },
     });
     assert.equal(views.size, 2);
@@ -111,6 +103,7 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     assert.equal(host.methods.length, 0, 'root discovery is registry-only');
     const [sessionNode] = await sessions.getChildren(hostNode);
     const [chatNode] = await sessions.getChildren(sessionNode);
+    assert.deepEqual(telemetry.events.map(e => e.name), ['extension.activated'], 'browsing is not telemetry');
     for (const item of [hostNode, sessionNode, chatNode]) assert.equal(sessions.getTreeItem(item).command, undefined);
     assert.equal(sessions.getTreeItem(chatNode).contextValue, 'wechatChat');
     assert.equal(host.actions.length, 0);
@@ -130,8 +123,16 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     assert.equal(sessionsView.revealed.node.id, chatNode.id);
     await commands.get('wechatAHP.bindAndConnect')(chatNode);
     assert.equal(host.actions.length, 0, 'cancelled consent must not connect');
+    assert.deepEqual(telemetry.events.at(-1), {
+      channel: 'usage', name: 'wechatAHP.bindAndConnect.result', properties: { outcome: 'cancelled' }, measurements: undefined,
+    });
     permitConnect = true;
     await commands.get('wechatAHP.connect')();
+    assert.equal(telemetry.events.at(-1).name, 'wechatAHP.connect.result');
+    assert.equal(telemetry.events.at(-1).properties.outcome, 'success');
+    const afterConnect = telemetry.events.length;
+    await commands.get('wechatAHP.connect')();
+    assert.deepEqual(telemetry.events.slice(afterConnect).map(e => e.name), ['wechatAHP.connect'], 'no-op is not another connection success');
     await waitFor(() => host.actions.some(item => item.action.type === 'chat/turnStarted'));
     const current = () => connection.getChildren();
     assert.equal(contexts.get('wechatAHP.active'), true);
@@ -154,6 +155,7 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     await waitFor(() => current().find(row => row.id === 'recent').children[0]?.value.startsWith('API accepted'));
     sessionsView.setVisible(false); connectionView.setVisible(false);
     assert.equal(contexts.get('wechatAHP.active'), true, 'hiding views must not stop sync');
+    assert.equal(telemetry.events.length, afterConnect + 1, 'polling, messages and view updates must not generate telemetry');
     await commands.get('wechatAHP.copyDiagnostics')();
     const safe = JSON.stringify({ rows: current(), tree: [hostNode, sessionNode, chatNode], diagnostics: clipboard.at(-1) });
     for (const value of [credentials.token, credentials.ownerId, host.target.connectionToken, 'TEST-PRIVATE-CONTEXT-ui', 'PRIVATE-INBOUND-BODY', 'PRIVATE-ASSISTANT-BODY']) {
@@ -166,14 +168,26 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     assert.equal(current().find(row => row.id === 'ahp').value, 'Disconnected');
     assert.equal(host.actions.some(item => item.action.type === 'chat/turnCancelled'), false);
     assert.deepEqual(errors, []);
+    const beforeBindConnect = telemetry.events.length;
+    await commands.get('wechatAHP.bindAndConnect')(chatNode);
+    assert.deepEqual(telemetry.events.slice(beforeBindConnect).map(e => e.name), [
+      'wechatAHP.bindAndConnect', 'wechatAHP.bindAndConnect.result',
+    ]);
+    assert.equal(telemetry.events.at(-1).properties.outcome, 'success');
+    telemetry.reporters[0].beforeDispose = () => assert.equal(contexts.get('wechatAHP.active'), false);
+    await commands.get('wechatAHP.disconnect')();
     await commands.get('wechatAHP.refreshSessions')();
     await commands.get('wechatAHP.bindChat')({ ...chatNode, id: 'forged-node-id' });
     assert.match(errors.at(-1), /no longer in the catalog/);
+    assert.equal(telemetry.events.at(-1).name, 'wechatAHP.bindChat.error');
+    const payload = JSON.stringify(telemetry.events);
+    for (const value of [binding.chat, binding.session, credentials.token, credentials.ownerId, host.target.connectionToken,
+      'TEST-PRIVATE-CONTEXT-ui', 'PRIVATE-INBOUND-BODY', 'PRIVATE-ASSISTANT-BODY']) assert.ok(!payload.includes(value));
     assert.equal(secrets.data.has(SECRET_KEY), true);
   } finally {
     releaseSendResponse();
-    Module._load = originalLoad;
     await extension?.deactivate();
+    assert.equal(telemetry.reporters[0].disposed, true);
     for (const subscription of subscriptions) subscription.dispose();
     globalThis.fetch = originalFetch;
     restoreEnvironment();

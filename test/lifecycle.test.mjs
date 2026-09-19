@@ -114,6 +114,7 @@ test('workspace trust prevents initialization or polling; startup failure does n
     resolveHost: async () => assert.fail('must not connect'),
     assertAllowed() { throw new SafeError('Workspace is untrusted.'); },
     assertScope: async () => {}, log() {}, status: phase => phases.push(phase), failed() {},
+    terminalError: () => assert.fail('Startup errors belong to the initiating command, not background telemetry'),
   });
   await assert.rejects(runtime.start(), /untrusted/);
   await runtime.stop();
@@ -124,10 +125,12 @@ test('poll retries are bounded, and stop cancels an active long poll', async t =
   const host = await fakeHost(t);
   const { vault: store } = await vault();
   const errors = [];
+  const terminalErrors = [];
   let polls = 0;
   const base = {
     binding, vault: store, resolveHost: async () => host.target,
     assertAllowed() {}, assertScope: async () => {}, log() {}, status() {}, failed: error => errors.push(error),
+    terminalError: error => terminalErrors.push(error),
     wait: (ms, signal) => pause(Math.min(ms, 1), signal), ackTimeout: 500,
   };
   const runtime = new ChannelRuntime({
@@ -137,6 +140,7 @@ test('poll retries are bounded, and stop cancels an active long poll', async t =
   await runtime.finished;
   assert.equal(polls, 7);
   assert.match(errors[0], /six retries/);
+  assert.equal(terminalErrors.length, 1, 'only terminal failure, not each retry');
   let cancelled = false;
   const waiting = new ChannelRuntime({
     ...base, api: { updates: async (_cursor, abort) => {
@@ -148,6 +152,7 @@ test('poll retries are bounded, and stop cancels an active long poll', async t =
   await waiting.start();
   await waiting.stop();
   assert.equal(cancelled, true);
+  assert.equal(terminalErrors.length, 1, 'disconnect must not report a background error');
   assert.equal(store.snapshot().messages.length, 0);
   assert.equal(host.actions.some(a => a.action.type === 'chat/turnCancelled'), false);
 });
@@ -171,4 +176,27 @@ test('reconnect keeps per-client action sequence monotonic', async t => {
   const seqs = host.actions.map(action => action.clientSeq);
   assert.ok(seqs.every((seq, i) => i === 0 || seq > seqs[i - 1]));
   assert.equal(new Set(host.actions.map(action => action.clientId)).size, 1);
+});
+
+test('terminal cleanup failures retain a category without duplicating an earlier channel failure', async t => {
+  const host = await fakeHost(t);
+  for (const failPoll of [false, true]) {
+    const { vault: store } = await vault();
+    const errors = [];
+    store.invalidateReplies = async () => { throw new SafeError('PRIVATE-CLEANUP', false, 'storage'); };
+    const runtime = new ChannelRuntime({
+      binding, vault: store, resolveHost: async () => host.target,
+      assertAllowed() {}, assertScope: async () => {}, log() {}, status() {}, failed() {},
+      terminalError: error => errors.push(error.kind),
+      api: { updates: async (_cursor, signal) => {
+        if (failPoll) throw new SafeError('PRIVATE-AUTH', false, 'auth');
+        await pause(10000, signal);
+        return { msgs: [] };
+      } },
+    });
+    await runtime.start();
+    if (failPoll) await runtime.finished;
+    else await runtime.stop();
+    assert.deepEqual(errors, [failPoll ? 'auth' : 'storage']);
+  }
 });

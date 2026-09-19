@@ -14,6 +14,7 @@ Direct runtime dependencies:
 | Package | Pinned version | License |
 |---|---|---|
 | @microsoft/agent-host-protocol | 0.9.0 | MIT |
+| @vscode/extension-telemetry | 1.5.2 | MIT |
 | ws | 8.21.3 | MIT |
 | qrcode | 1.5.4 | MIT |
 | lossless-json | 4.3.1 | MIT |
