@@ -1,12 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
 import { SessionCatalog, SafeError } from '../.test-build/core.mjs';
 import { binding, fakeHost, waitFor } from './helpers.mjs';
 
 function catalog(t, host, options = {}) {
   const result = new SessionCatalog({
-    assertAllowed() {}, roots: () => [process.cwd()], log() {},
+    assertAllowed() {}, log() {},
     discover: async () => [host.target], resolve: async id => {
       assert.equal(id, host.target.id); return host.target;
     }, ...options,
@@ -47,29 +46,37 @@ test('catalog is lazy, paginated and credential-free; browsing never subscribes 
   assert.equal(host.actions.length, 0);
 });
 
-test('catalog checks workspace trust before discovery and disables out-of-workspace chat binding', async t => {
+test('catalog retains environment checks and gates binding on readiness/interactivity, not workspace folders', async t => {
   let discovered = false;
   const denied = new SessionCatalog({
-    assertAllowed() { throw new SafeError('Workspace is untrusted.'); }, roots: () => [], log() {},
+    assertAllowed() { throw new SafeError('Remote environments are unsupported.'); }, log() {},
     discover: async () => { discovered = true; return []; },
   });
   t.after(() => denied.dispose());
   const error = await denied.children();
   assert.equal(discovered, false);
-  assert.match(error[0].title, /untrusted/);
+  assert.match(error[0].title, /Remote environments/);
   const host = await fakeHost(t);
-  const service = catalog(t, host, { roots: () => [resolve('.test-build')] });
+  host.session.workingDirectories = undefined;
+  host.session.chats.push({ ...host.session.chats[0], resource: 'ahp-chat:/readonly', interactivity: 'read-only' });
+  const service = catalog(t, host);
   const [hostNode] = await service.children();
   const [session] = await service.children(hostNode);
-  const [chat] = await service.children(session);
-  assert.equal(chat.eligible, false);
-  assert.match(chat.unavailableReason, /different workspace/);
+  const [chat, readOnly] = await service.children(session);
+  assert.equal(chat.eligible, true);
+  assert.deepEqual(chat.workingDirectories, []);
+  assert.equal(readOnly.eligible, false);
+  assert.match(readOnly.unavailableReason, /not interactive/);
+  host.session.lifecycle = 'creating';
+  service.refresh(session);
+  assert.match((await service.children(session))[0].title, /not ready/);
+  assert.equal(host.actions.length, 0);
 });
 
 test('stale discovery cannot restore removed hosts after refresh or disposal', async () => {
   const resolvers = [];
   const service = new SessionCatalog({
-    assertAllowed() {}, roots: () => [], log() {},
+    assertAllowed() {}, log() {},
     discover: () => new Promise(resolve => resolvers.push(resolve)),
   });
   const old = service.children();

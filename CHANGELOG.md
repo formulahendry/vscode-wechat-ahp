@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Allow sign-in, session selection and text sync from untrusted workspaces,
+  virtual workspaces and windows with no folder open on native local desktop
+  VS Code. Binding targets an explicitly selected existing Host/session/chat,
+  independent of the current workspace.
+- Preserve legacy binding identities and private delivery journals. Host
+  authentication, chat interactivity, owner verification and tool approvals
+  remain in place. Remote development and VS Code Web remain unsupported.
+
 ## [0.1.2] - 2026-09-20
 
 ### Added

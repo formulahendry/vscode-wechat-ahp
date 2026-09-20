@@ -10,7 +10,8 @@ export const bindingSchema = z.object({
   hostId: bytes(512).regex(/^Code(?: - Insiders)?:[\w:.-]+$/),
   session: z.string().refine(isChannelResourceUri),
   chat: z.string().refine(isChannelResourceUri),
-  workspace: digest,
+  // Legacy journal discriminator, not a workspace authorization requirement.
+  workspace: digest.optional(),
 }).strict();
 export type Binding = z.infer<typeof bindingSchema>;
 

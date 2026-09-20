@@ -43,12 +43,10 @@
   ],
   "capabilities": {
     "untrustedWorkspaces": {
-      "supported": false,
-      "description": "WeChat controls an existing agent chat. Open a trusted local workspace first."
+      "supported": true
     },
     "virtualWorkspaces": {
-      "supported": false,
-      "description": "Only desktop VS Code with a local workspace and local Agent Host is supported."
+      "supported": true
     }
   },
   "contributes": {
@@ -66,8 +64,7 @@
     "viewsWelcome": [
       {
         "view": "wechatAHP.sessions",
-        "contents": "Browse local Agent Hosts, then bind an existing chat. Browsing never starts WeChat sync.\n[Refresh Local Hosts](command:wechatAHP.refreshSessions)\n[Select Existing Chat](command:wechatAHP.selectChat)\nA compatible running Agent Host is required; ordinary chat windows may not expose AHP.",
-        "when": "isWorkspaceTrusted"
+        "contents": "Browse local Agent Hosts, then bind an existing chat. Browsing never starts WeChat sync.\n[Refresh Local Hosts](command:wechatAHP.refreshSessions)\n[Select Existing Chat](command:wechatAHP.selectChat)\nA compatible running Agent Host is required; ordinary chat windows may not expose AHP."
       }
     ],
     "commands": [
@@ -75,7 +72,7 @@
         "command": "wechatAHP.login",
         "title": "WeChat AHP: Sign in with QR",
         "icon": "$(account)",
-        "enablement": "isWorkspaceTrusted && !wechatAHP.active && !wechatAHP.busy"
+        "enablement": "!wechatAHP.active && !wechatAHP.busy"
       },
       {
         "command": "wechatAHP.selectChat",
@@ -85,7 +82,7 @@
         "command": "wechatAHP.connect",
         "title": "WeChat AHP: Connect",
         "icon": "$(plug)",
-        "enablement": "isWorkspaceTrusted && wechatAHP.bound && wechatAHP.signedIn && !wechatAHP.active && !wechatAHP.busy"
+        "enablement": "wechatAHP.bound && wechatAHP.signedIn && !wechatAHP.active && !wechatAHP.busy"
       },
       {
         "command": "wechatAHP.disconnect",
@@ -113,8 +110,8 @@
       { "command": "wechatAHP.pingHost", "title": "Check AHP Connection", "category": "WeChat AHP", "icon": "$(pulse)" },
       { "command": "wechatAHP.nodeDetails", "title": "View AHP Details", "category": "WeChat AHP", "icon": "$(info)" },
       { "command": "wechatAHP.copyResource", "title": "Copy Resource URI", "category": "WeChat AHP", "icon": "$(copy)" },
-      { "command": "wechatAHP.bindChat", "title": "Bind Chat", "category": "WeChat AHP", "icon": "$(pin)", "enablement": "isWorkspaceTrusted && !wechatAHP.active && !wechatAHP.busy" },
-      { "command": "wechatAHP.bindAndConnect", "title": "Bind and Connect", "category": "WeChat AHP", "icon": "$(plug)", "enablement": "isWorkspaceTrusted && wechatAHP.signedIn && !wechatAHP.active && !wechatAHP.busy" },
+      { "command": "wechatAHP.bindChat", "title": "Bind Chat", "category": "WeChat AHP", "icon": "$(pin)", "enablement": "!wechatAHP.active && !wechatAHP.busy" },
+      { "command": "wechatAHP.bindAndConnect", "title": "Bind and Connect", "category": "WeChat AHP", "icon": "$(plug)", "enablement": "wechatAHP.signedIn && !wechatAHP.active && !wechatAHP.busy" },
       { "command": "wechatAHP.diagnostics", "title": "Show Diagnostics", "category": "WeChat AHP", "icon": "$(output)" },
       { "command": "wechatAHP.copyDiagnostics", "title": "Copy Redacted Diagnostics", "category": "WeChat AHP", "icon": "$(copy)" },
       { "command": "wechatAHP.recentDeliveries", "title": "Show Recent Deliveries", "category": "WeChat AHP", "icon": "$(history)" }

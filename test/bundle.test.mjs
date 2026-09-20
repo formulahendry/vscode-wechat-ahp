@@ -7,7 +7,7 @@ import { VERSION } from '../.test-build/core.mjs';
 import { credentials, MemorySecrets, mockOsForTests } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 
-test('bundled entry uses only vscode/builtins, rejects untrusted workspace and renders local QR with fake HTTP', async () => {
+test('bundled entry uses only vscode/builtins, rejects Remote and supports QR login in every local window mode', async () => {
   const require = createRequire(import.meta.url);
   const Module = require('node:module');
   const original = Module._load;
@@ -52,8 +52,14 @@ test('bundled entry uses only vscode/builtins, rejects untrusted workspace and r
   assert.equal(telemetryLoggers, 1);
   assert.equal(secrets.writes.length, 0);
   assert.equal(globals.size, 0);
+  for (const remoteName of ['ssh-remote', 'wsl', 'dev-container']) {
+    stub.env.remoteName = remoteName;
+    await commands.get('wechatAHP.connect')();
+    assert.match(errors.at(-1), /Remote-SSH, WSL, dev containers and web are unsupported/);
+  }
+  stub.env.remoteName = undefined;
   await commands.get('wechatAHP.connect')();
-  assert.match(errors[0], /Trust this local workspace/);
+  assert.match(errors.at(-1), /Select Existing Host/);
   await extension.deactivate();
   for (const external of externals) {
     assert.ok(external === '../dist/extension.cjs' || external === 'vscode'
@@ -61,13 +67,15 @@ test('bundled entry uses only vscode/builtins, rejects untrusted workspace and r
   }
   const bundle = await readFile(new URL('../dist/extension.cjs', import.meta.url), 'utf8');
   assert.doesNotMatch(bundle, /C:\\\\code|TEST-ONLY-BOT|TEST-PRIVATE-CONTEXT|\.test-build|wechat-ahp-channel/);
-  {
+  for (const mode of ['untrusted', 'virtual', 'empty']) {
     let html = '';
     let disposed = false;
     const calls = [];
     const originalFetch = globalThis.fetch;
-    stub.workspace.isTrusted = true;
-    stub.workspace.workspaceFolders = [{ uri: { scheme: 'file', fsPath: process.cwd(), toString: () => 'file:///fixture-workspace' } }];
+    stub.workspace.workspaceFolders = mode === 'empty' ? undefined : [{ uri: {
+      scheme: mode === 'virtual' ? 'vscode-vfs' : 'file',
+      get fsPath() { throw new Error('QR login must not access workspace paths.'); },
+    } }];
     stub.window.showWarningMessage = async () => 'Show QR';
     stub.window.showInformationMessage = async () => undefined;
     stub.window.createWebviewPanel = (_type, _title, _column, options) => {
@@ -90,9 +98,10 @@ test('bundled entry uses only vscode/builtins, rejects untrusted workspace and r
       }));
     };
     try {
+      const before = telemetryLoggers;
       extension.activate(context);
       await commands.get('wechatAHP.login')();
-      assert.equal(telemetryLoggers, 2);
+      assert.equal(telemetryLoggers, before + 1);
       assert.equal(calls.length, 2);
       assert.equal(secrets.state().credentials.ownerId, credentials.ownerId);
       assert.equal(globals.size, 0);

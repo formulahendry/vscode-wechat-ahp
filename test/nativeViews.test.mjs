@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { bindingKey, Vault, SECRET_KEY, VERSION, WAITING_NOTICE, withAbort } from '../.test-build/core.mjs';
+import { bindingKey, hash, Vault, SECRET_KEY, VERSION, WAITING_NOTICE, withAbort } from '../.test-build/core.mjs';
 import { binding, credentials, fakeHost, fakeWeixin, message, MemorySecrets, waitFor, registryFixtureDirectories, registryEnvironment } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 import { fakeTelemetry, loadTelemetryExtension } from './telemetryHelpers.mjs';
@@ -12,6 +12,10 @@ import { fakeTelemetry, loadTelemetryExtension } from './telemetryHelpers.mjs';
 test('manifest contributes two native English views and scoped actions matching the runtime version', async () => {
   const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(manifest.version, VERSION);
+  assert.deepEqual(manifest.extensionKind, ['ui']);
+  assert.equal(manifest.capabilities.untrustedWorkspaces.supported, true);
+  assert.equal(manifest.capabilities.virtualWorkspaces.supported, true);
+  assert.doesNotMatch(JSON.stringify(manifest.contributes), /isWorkspaceTrusted|wechatAHP\.trusted/);
   assert.deepEqual(manifest.contributes.views.wechatAHP.map(view => view.name), ['Sessions', 'Connection']);
   assert.equal(manifest.contributes.viewsContainers.activitybar[0].icon, 'media/wechat-ahp.svg');
   for (const command of manifest.contributes.commands) assert.match(command.title, /^[\x20-\x7e]+$/);
@@ -24,8 +28,9 @@ test('manifest contributes two native English views and scoped actions matching 
   assert.doesNotMatch(icon, /script|href=/);
 });
 
-test('native views reuse scoped controller actions, stay read-only while browsing, and reflect live health without secrets', async t => {
+for (const mode of ['trusted', 'untrusted', 'virtual', 'empty']) test(`native views bind and sync independently of the ${mode} window`, async t => {
   const host = await fakeHost(t);
+  if (mode === 'empty') host.session.workingDirectories = undefined;
   const weixin = await fakeWeixin(t, [{ ret: 0, msgs: [message('ui', 'PRIVATE-INBOUND-BODY')], get_updates_buf: 'ui-cursor' }]);
   const root = resolve('.test-build', `native-ui-${randomUUID()}`);
   const dirs = registryFixtureDirectories(root);
@@ -54,8 +59,12 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     StatusBarAlignment: { Left: 1 }, env: {},
     CancellationTokenSource: class { token = {}; cancel() {} dispose() {} },
     workspace: {
-      isTrusted: true,
-      workspaceFolders: [{ uri: { scheme: 'file', fsPath: process.cwd(), toString: () => pathToFileURL(process.cwd()).href } }],
+      isTrusted: mode === 'trusted',
+      workspaceFolders: mode === 'empty' ? undefined : [{ uri: {
+        scheme: mode === 'virtual' ? 'vscode-vfs' : 'file',
+        get fsPath() { throw new Error('The bridge must not read the current workspace path.'); },
+        toString: () => mode === 'virtual' ? 'vscode-vfs://github/example/repo' : pathToFileURL(resolve('.test-build', 'unrelated-folder')).href,
+      } }],
       onDidChangeWorkspaceFolders: dispose,
     },
     window: {
@@ -115,9 +124,13 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     assert.equal(clipboard.at(-1), binding.chat);
     await commands.get('wechatAHP.pingHost')(hostNode);
     assert.ok(information.some(text => text.includes('AHP ping')));
+    if (mode === 'trusted') globals.set('wechat-ahp.binding.v1', {
+      hostId: hostNode.hostId, session: sessionNode.resource, chat: chatNode.resource, workspace: hash('legacy workspace'),
+    });
     await commands.get('wechatAHP.bindChat')(chatNode);
     assert.equal(pickCalls, 1, 'tree binding must not rerun the selection wizard');
     assert.equal(globals.get('wechat-ahp.binding.v1').chat, binding.chat);
+    assert.equal(Object.hasOwn(globals.get('wechat-ahp.binding.v1'), 'workspace'), mode === 'trusted');
     assert.equal(contexts.get('wechatAHP.bound'), true);
     assert.equal(host.actions.length, 0, 'binding alone must not register the client');
     assert.equal(sessions.getTreeItem(chatNode).contextValue, 'wechatChatBound');

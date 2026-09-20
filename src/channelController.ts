@@ -2,14 +2,13 @@ import * as vscode from 'vscode';
 import QRCode from 'qrcode';
 import { SUPPORTED_PROTOCOL_VERSIONS } from '@microsoft/agent-host-protocol';
 import { HostConnection } from './ahp.js';
-import { diagnostic, hash, SafeError } from './common.js';
+import { diagnostic, SafeError } from './common.js';
 import { selectionFailure } from './diagnostics.js';
 import { discoverHosts, resolveHost } from './endpoints.js';
 import { login } from './login.js';
 import { OwnerLock } from './lock.js';
 import { ChannelRuntime } from './runtime.js';
-import { assertSessionScope } from './scope.js';
-import { bindingKey, parseBinding, SECRET_KEY, type Binding, Vault } from './storage.js';
+import { bindingKey, bindingSchema, parseBinding, SECRET_KEY, type Binding, Vault } from './storage.js';
 import { label, qrHtml } from './ui.js';
 import { WeixinApi } from './weixin.js';
 import { initialChannelState, privateSummary, sendStatus, type ChannelState } from './channelState.js';
@@ -39,8 +38,8 @@ export class ChannelController {
 
   constructor(private readonly context: vscode.ExtensionContext, private readonly telemetry: Telemetry) {
     this.catalog = new SessionCatalog({
-      assertAllowed: () => { this.trusted(); },
-      roots: () => this.roots(), log: message => this.log(message),
+      assertAllowed: () => this.assertEnvironment(),
+      log: message => this.log(message),
     });
     this.status.command = 'wechatAHP.focus';
     this.setStatus('Disconnected');
@@ -62,7 +61,7 @@ export class ChannelController {
       this.catalog.refresh();
       if (this.runtime || this.operation) {
         void this.stop().catch(error => this.log(diagnostic(error)));
-        this.log('Workspace changed; channel stopped. Select and confirm a binding again.');
+        this.log('Workspace changed; channel stopped. Reconnect explicitly to resume the selected chat.');
       }
       void this.refreshState().catch(error => this.reportError(error));
     }));
@@ -157,17 +156,9 @@ export class ChannelController {
     });
   }
 
-  private trusted(): string {
+  private assertEnvironment(): void {
     assertLocalDesktop({ remoteName: vscode.env.remoteName });
-    if (!vscode.workspace.isTrusted) throw new SafeError('Trust this local workspace in VS Code before enabling a remote-control channel.');
-    const folders = vscode.workspace.workspaceFolders;
-    if (!folders?.length || folders.some(folder => folder.uri.scheme !== 'file')) {
-      throw new SafeError('Open the agent session\'s trusted local folder first. Empty/virtual workspaces are unsupported.');
-    }
-    return hash(JSON.stringify(folders.map(folder => folder.uri.toString()).sort()));
   }
-
-  private roots(): string[] { return vscode.workspace.workspaceFolders?.map(folder => folder.uri.fsPath) ?? []; }
 
   private binding(): Binding | undefined {
     const value = this.context.globalState.get<unknown>(BINDING_KEY);
@@ -218,7 +209,7 @@ export class ChannelController {
   }
 
   private async signIn(signal: AbortSignal, attempt: CommandTelemetry): Promise<void> {
-    this.trusted();
+    this.assertEnvironment();
     await this.idleLock(async () => {
       const existing = await Vault.load(this.context.secrets);
       if (await vscode.window.showWarningMessage(
@@ -288,7 +279,7 @@ export class ChannelController {
   }
 
   private async selectChat(signal: AbortSignal, target?: CatalogChat): Promise<boolean> {
-    let stage = 'workspace trust';
+    let stage = 'desktop environment';
     const step = <T>(name: string, work: () => T): T => {
       stage = name;
       this.log(`Select chat: ${name}.`);
@@ -296,7 +287,7 @@ export class ChannelController {
       return work();
     };
     try {
-      const workspace = step('workspace trust', () => this.trusted());
+      step('desktop environment', () => this.assertEnvironment());
       const saved = await step('window ownership', () => this.idleLock(async () => {
         const hosts = await step('host discovery', () => discoverHosts(undefined, message => this.log(message)));
         if (!hosts.length) throw new SafeError('No local Agent Host endpoint found. Open a supported AHP-backed conversation first. Installing this extension does not create a Host/provider; ordinary chat windows may not expose AHP.');
@@ -337,10 +328,21 @@ export class ChannelController {
             if (target) throw new SafeError('The selected chat is no longer interactive or available.');
             return;
           }
-          await step('workspace scope', () => assertSessionScope(state, chat.item.resource, this.roots()));
-          const binding = step('binding validation', () => parseBinding({
-            hostId: selected.host.id, session: session.item.resource, chat: chat.item.resource, workspace,
-          }));
+          const binding = step('binding validation', () => {
+            const candidate = parseBinding({
+              hostId: selected.host.id, session: session.item.resource, chat: chat.item.resource,
+            });
+            const stored = this.context.globalState.get<unknown>(BINDING_KEY);
+            if (stored === undefined) return candidate;
+            const previous = bindingSchema.safeParse(stored);
+            if (!previous.success) {
+              this.log('Previous binding is invalid; confirm the selected chat to replace it.');
+              return candidate;
+            }
+            // Preserve legacy journal identity when reselecting the same exact chat.
+            return previous.data.hostId === candidate.hostId && previous.data.session === candidate.session
+              && previous.data.chat === candidate.chat ? previous.data : candidate;
+          });
           const vault = await step('private journal', () => Vault.load(this.context.secrets));
           const privateState = vault?.snapshot();
           if (privateState?.messages.some(message => message.binding !== bindingKey(binding) && message.delivery !== 'closed')
@@ -349,11 +351,11 @@ export class ChannelController {
             throw new SafeError('Previous binding has pending journal entries. Inspect that chat and use Clear Pending Journal before switching; old replies will never be rerouted.');
           }
           if (await step('binding confirmation', () => vscode.window.showWarningMessage(
-            `Bind WeChat AHP to this existing conversation?\nHost: ${binding.hostId}\nSession: ${binding.session}\nChat: ${binding.chat}\nIts working directories are inside this trusted workspace.`,
+            `Bind WeChat AHP to this existing conversation?\nHost: ${binding.hostId}\nSession: ${binding.session}\nChat: ${binding.chat}\nThis binding is independent of the folder open in this window. The selected Agent Host controls its working directories and tool permissions.`,
             { modal: true }, 'Save Binding',
           )) !== 'Save Binding') return;
           signal.throwIfAborted();
-          if (this.trusted() !== workspace) throw new SafeError('Workspace changed; binding not saved.');
+          this.assertEnvironment();
           await step('binding save', () => this.context.globalState.update(BINDING_KEY, binding));
           this.publish({ binding });
           this.log('Explicit host/session/chat binding saved. No Host token persisted.');
@@ -369,10 +371,9 @@ export class ChannelController {
 
   private async connect(signal: AbortSignal, attempt: CommandTelemetry): Promise<void> {
     if (this.runtime) { this.log('Channel is already connected/connecting.'); return; }
-    const workspace = this.trusted();
+    this.assertEnvironment();
     const binding = this.binding();
     if (!binding) throw new SafeError('Select Existing Host / Session / Chat before connecting.');
-    if (binding.workspace !== workspace) throw new SafeError('Binding belongs to another workspace. Open that trusted local workspace or select a new binding.');
     if (await vscode.window.showWarningMessage(
       `Enable TWO-WAY TEXT SYNC with your QR-confirmed WeChat owner?\n${binding.hostId}\n${binding.session}\n${binding.chat}\nNew VS Code user messages and completed assistant text from THIS chat will automatically be sent to WeChat. WeChat text enters this chat unchanged. No history, reasoning, tools, attachments or other chats are copied. WeChat may show typing and receive a fixed notice when VS Code input is needed. Tool approvals stay in VS Code. A message from WeChat is needed to establish reply context.`,
       { modal: true }, 'Connect',
@@ -389,10 +390,7 @@ export class ChannelController {
       const runtime = new ChannelRuntime({
         binding, vault, api: new WeixinApi(credentials.base, credentials.token),
         resolveHost: () => resolveHost(binding.hostId, message => this.log(message)),
-        assertAllowed: () => {
-          if (this.trusted() !== binding.workspace) throw new SafeError('Trusted workspace changed; channel stopped.');
-        },
-        assertScope: session => assertSessionScope(session, binding.chat, this.roots()),
+        assertAllowed: () => this.assertEnvironment(),
         log: message => this.log(message), status: phase => this.setStatus(phase),
         health: update => this.publish(update),
         terminalError: error => this.telemetry.error('wechatAHP.channel.error', error),
@@ -448,7 +446,7 @@ export class ChannelController {
   }
 
   private async clearPending(signal: AbortSignal): Promise<void> {
-    this.trusted();
+    this.assertEnvironment();
     await this.idleLock(async () => {
       const vault = await Vault.load(this.context.secrets);
       if (!vault) throw new SafeError('No private journal exists.');

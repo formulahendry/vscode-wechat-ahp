@@ -52,10 +52,11 @@ redacted. "API accepted" is not a read receipt.*
   the local UI extension host. The same universal extension package is used on
   all three systems; the runtime contains no platform-specific native add-ons.
 - A running **local Agent Host** that supports the Agent Host Protocol (AHP),
-  exposes an existing session/chat and its working directories, and supports
+  exposes an existing interactive session/chat, and supports
   user turns, queued messages, and completed text response events.
-- The agent's working directories must be inside the local workspace folders
-  that you have explicitly trusted in VS Code.
+- The desktop window may have a trusted or untrusted workspace, a virtual
+  workspace, or no folder open. Binding is to the selected Host/session/chat,
+  not to the folder open in this window.
 - A WeChat account that can complete the Weixin bot QR sign-in flow. Account
   eligibility and service availability depend on Weixin.
 - A working OS credential store for VS Code SecretStorage. On macOS, unlock
@@ -65,6 +66,13 @@ redacted. "API accepted" is not a read receipt.*
 The extension bundles its runtime dependencies. You do not need Node.js or a
 separate channel CLI to use it. Your agent provider's own setup, subscription,
 permissions, and usage charges still apply.
+
+Supporting an untrusted or virtual workspace does not enable a disabled Agent
+Host/provider or give the agent virtual-file-system support. The selected Host
+must already be available and remains responsible for its working directories,
+authentication and tool permissions. This extension does not read or execute
+code from the current workspace, and does not automatically forward its files.
+Remote-SSH, WSL, dev containers and VS Code Web remain unsupported.
 
 ### Local Agent Host discovery
 
@@ -96,7 +104,7 @@ supports AHP.
 
 ## Get started
 
-1. Open the local folder used by your existing agent session and trust it in VS Code.
+1. Open a local desktop VS Code window and ensure your compatible local Agent Host has an existing conversation. No folder needs to be open in this window.
 2. Open **WeChat AHP** in the Activity Bar.
 3. In **Connection**, select **Sign in with QR**. Scan with your own WeChat account
    and confirm on your phone. Closing the QR panel cancels sign-in.
@@ -196,7 +204,10 @@ progress percentage or a guarantee that the agent will complete.
 - Only the owner identified by QR confirmation can send messages through the
   channel. Other senders, group messages, and non-text content are rejected.
 - You explicitly approve a binding to one existing chat. Selecting or expanding
-  a tree row never changes that binding.
+  a tree row never changes that binding. The chat can belong to a different
+  project than the current window; review the selected Host/session/chat before
+  connecting. This window's Workspace Trust is not an authorization boundary
+  for the selected agent, whose own permission and trust policies still apply.
 - Bot credentials, message cursors, private reply contexts, and the delivery
   journal use VS Code **SecretStorage**. Credentials are not stored in workspace
   settings or displayed in tree nodes and diagnostics.
@@ -328,7 +339,7 @@ journal schema version is independent of the extension package version.
 |---|---|
 | No local Agent Host appears | Open a compatible AHP-backed session first. An ordinary chat window may not expose AHP. |
 | The bound Host is unavailable | Refresh **Sessions**. A restarted Host may have a new identity; explicitly select the correct chat again. |
-| A chat is unavailable in this workspace | Open and trust its actual local working folders. The Host must expose working-directory metadata. |
+| A chat is unavailable for binding | Wait for the session to be ready and select an interactive chat. Read-only chats cannot receive prompts. |
 | Another window owns the channel | Disconnect or close that channel instance first. Do not run another poller for the same bot. |
 | Local owner lock port is occupied | On macOS/Linux, stop another instance first. If none is running, another local application may occupy the reported loopback port; the extension will not bypass the lock. |
 | SecretStorage is unavailable | Unlock or restore the OS credential store, then retry. Do not move credentials into settings or plaintext files. |

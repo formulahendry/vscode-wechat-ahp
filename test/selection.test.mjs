@@ -7,9 +7,9 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ClientClosedError, RpcError, RpcTimeoutError, TransportError } from '@microsoft/agent-host-protocol/client';
 import {
-  Bridge, HostConnection, Inbox, VERSION, bindingSchema, diagnostic, parseBinding, selectionFailure,
+  Bridge, HostConnection, Inbox, Vault, VERSION, bindingKey, bindingSchema, diagnostic, hash, parseBinding, selectionFailure,
 } from '../.test-build/core.mjs';
-import { binding, fakeHost, fakeWeixin, message, MemorySecrets, signal, vault, waitFor, registryFixtureDirectories, registryEnvironment, mockOsForTests } from './helpers.mjs';
+import { binding, credentials, fakeHost, fakeWeixin, message, MemorySecrets, signal, vault, waitFor, registryFixtureDirectories, registryEnvironment, mockOsForTests } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 
 const resources = {
@@ -38,6 +38,16 @@ test('binding preserves provider-defined session schemes and authority-bearing c
       });
     }
   }
+});
+
+test('workspace-free bindings are valid without changing legacy journal keys', () => {
+  const current = { hostId: resources.hostId, session: resources.session, chat: resources.chat };
+  assert.deepEqual(parseBinding(current), current);
+  assert.equal(bindingKey(parseBinding(resources)),
+    hash(JSON.stringify([resources.hostId, resources.session, resources.chat, resources.workspace])));
+  assert.equal(bindingKey(parseBinding(current)),
+    hash(JSON.stringify([current.hostId, current.session, current.chat, null])));
+  assert.equal(bindingSchema.safeParse({ ...current, workspace: 'invalid-legacy-field' }).success, false);
 });
 
 test('provider URI is used unchanged through SDK catalog, subscription, same-chat dispatch and authorized reply', async t => {
@@ -153,10 +163,22 @@ test('bundled Select Existing command saves the actual catalog URIs without Weix
     assert.deepEqual(errors, []);
     assert.equal(saved.get('wechat-ahp.binding.v1').session, resources.session);
     assert.equal(saved.get('wechat-ahp.binding.v1').chat, resources.chat);
+    assert.equal(Object.hasOwn(saved.get('wechat-ahp.binding.v1'), 'workspace'), false);
     assert.equal(host.actions.length, 0);
     assert.equal(secrets.writes.length, 0);
     assert.ok(logs.some(line => line.includes('Select chat: binding save.')));
     assert.doesNotMatch(logs.join('\n'), /TEST-ONLY|TEST-SECRET|TEST-PRIVATE/);
+    const legacy = { ...saved.get('wechat-ahp.binding.v1'), workspace: hash('another old workspace') };
+    saved.set('wechat-ahp.binding.v1', legacy);
+    const privateState = await Vault.create(secrets, credentials);
+    const oldInbox = new Inbox(privateState, legacy, {}, () => {});
+    await oldInbox.accept({ msgs: [message('legacy-pending')], cursor: 'keep-cursor' }, signal());
+    const before = secrets.state();
+    await commands.get('wechatAHP.selectChat')();
+    assert.deepEqual(errors, []);
+    assert.deepEqual(saved.get('wechat-ahp.binding.v1'), legacy);
+    assert.deepEqual(secrets.state(), before, 'reselecting a legacy binding must not migrate or discard its pending journal');
+    assert.equal(bindingKey(saved.get('wechat-ahp.binding.v1')), before.messages[0].binding);
     let consent;
     stub.window.showWarningMessage = async text => { consent = text; return undefined; };
     await commands.get('wechatAHP.connect')();

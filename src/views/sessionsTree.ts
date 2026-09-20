@@ -50,7 +50,7 @@ export class SessionsTree implements vscode.TreeDataProvider<CatalogNode>, vscod
       const bound = state.binding?.hostId === node.hostId && state.binding.session === node.session && state.binding.chat === node.resource;
       item.contextValue = node.eligible ? bound ? 'wechatChatBound' : 'wechatChat' : 'wechatChatUnavailable';
       item.iconPath = new vscode.ThemeIcon(!node.eligible ? 'lock' : bound ? 'pinned' : 'comment');
-      item.description = `${bound ? 'Bound / ' : ''}${node.eligible ? bound && state.active ? state.agent : agentStatus(node.status) : 'Unavailable in this workspace'}`;
+      item.description = `${bound ? 'Bound / ' : ''}${node.eligible ? bound && state.active ? state.agent : agentStatus(node.status) : 'Unavailable for binding'}`;
       item.tooltip = [
         node.title, `Chat: ${node.resource}`, `Session: ${node.session}`, `Host: ${node.hostId}`,
         ...(node.unavailableReason ? [node.unavailableReason] : []),

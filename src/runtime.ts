@@ -17,7 +17,7 @@ export interface RuntimeOptions {
   api: BotApi;
   resolveHost(): Promise<Host>;
   assertAllowed(): void;
-  assertScope(session: SessionState): Promise<void>;
+  assertScope?(session: SessionState): Promise<void>;
   log(message: string): void;
   status(status: string): void;
   failed(message: string): void;

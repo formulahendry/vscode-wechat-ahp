@@ -63,7 +63,7 @@ export function registerViews(context: vscode.ExtensionContext, controller: Chan
       ['Session', selected.resource], ['Host', selected.hostId], ['Provider', selected.provider],
     ] : selected.kind === 'chat' ? [
       ['Chat', selected.resource], ['Session', selected.session], ['Host', selected.hostId],
-      ['Binding eligibility', selected.unavailableReason ?? 'Available in this trusted workspace'],
+      ['Binding eligibility', selected.unavailableReason ?? 'Available for explicit binding'],
       ...selected.workingDirectories.map(path => ['Workspace', path]),
     ] : [['Info', selected.title]];
     await vscode.window.showQuickPick(details.map(([label, detail]) => ({ label: label!, detail })),

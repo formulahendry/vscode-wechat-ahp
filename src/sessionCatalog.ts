@@ -3,7 +3,6 @@ import { HostConnection } from './ahp.js';
 import { diagnostic, hash, SafeError, withAbort } from './common.js';
 import { selectionFailure } from './diagnostics.js';
 import { discoverHosts, resolveHost, type Host } from './endpoints.js';
-import { assertSessionScope } from './scope.js';
 import { label } from './ui.js';
 
 export interface CatalogHost {
@@ -27,7 +26,6 @@ export type CatalogNode = CatalogHost | CatalogSession | CatalogChat | CatalogNo
 interface Page { items: CatalogSession[]; cursor?: string; cursors: Set<string>; }
 export interface CatalogOptions {
   assertAllowed(): void;
-  roots(): readonly string[];
   log(message: string): void;
   discover?: () => Promise<Host[]>;
   resolve?: (id: string) => Promise<Host>;
@@ -202,10 +200,6 @@ export class SessionCatalog {
     for (const chat of state.chats) {
       let unavailableReason: string | undefined;
       if (chat.interactivity && chat.interactivity !== 'full') unavailableReason = 'This chat is not interactive.';
-      else {
-        try { await assertSessionScope(state, chat.resource, this.options.roots()); }
-        catch (error) { unavailableReason = diagnostic(error); }
-      }
       this.current(generation, signal);
       items.push({
         kind: 'chat', id: `chat-${hash(JSON.stringify([session.hostId, session.resource, chat.resource]))}`,
