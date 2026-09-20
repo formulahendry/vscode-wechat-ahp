@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 export const DEFAULT_BASE = 'https://ilinkai.weixin.qq.com';
 export const MAX_TEXT_BYTES = 16 * 1024;
 export const MAX_PENDING = 32;

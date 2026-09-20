@@ -317,7 +317,7 @@ establish reply context again.
 binding, and journal. It does not claim to revoke credentials on the server, and
 forgetting the journal also removes local deduplication evidence.
 
-This unreleased build uses private journal v3. It migrates v1/v2 data while
+Version 0.1.2 introduces private journal v3. It migrates v1/v2 data while
 preserving credentials and uncertain-send evidence. Older published 0.1.1 builds
 may refuse v3 state; avoid downgrading a profile after migration. The private
 journal schema version is independent of the extension package version.

@@ -5,7 +5,7 @@
 | Publisher | `formulahendry` |
 | Extension | `formulahendry.wechat-ahp` |
 | Repository | `formulahendry/vscode-wechat-ahp` |
-| Current version | `0.1.1` |
+| Current version | `0.1.2` |
 | Package | Universal desktop VSIX for Windows, macOS, and Linux |
 
 Do not bump versions, commit, tag, push, or publish without the maintainer's
@@ -59,7 +59,7 @@ build-only preview.** Use the CI workflow if you only want a candidate package.
 Publication proceeds automatically after the three-platform test job succeeds.
 
 For GitHub releases, the tag must equal `v` plus `package.json.version`, currently
-`v0.1.1`. GitHub prereleases do not automatically publish to either registry. The
+`v0.1.2`. GitHub prereleases do not automatically publish to either registry. The
 Marketplace `preview` flag is independent of GitHub prerelease status.
 
 The workflow does not create tags, commits, version bumps, or overwrite GitHub

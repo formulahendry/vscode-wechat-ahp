@@ -33,7 +33,7 @@ test('Weixin serialized POST has contract headers, cursor and explicit success',
   assert.equal(headers.authorization, `Bearer ${credentials.token}`);
   assert.equal(headers.authorizationtype, 'ilink_bot_token');
   assert.equal(headers['ilink-app-id'], 'bot');
-  assert.equal(headers['ilink-app-clientversion'], '257');
+  assert.equal(headers['ilink-app-clientversion'], '258');
   assert.deepEqual(fake.polls[0].base_info, { channel_version: VERSION, bot_agent: `WechatAHP-VSCode/${VERSION}` });
   assert.match(Buffer.from(headers['x-wechat-uin'], 'base64').toString(), /^\d+$/);
 });
