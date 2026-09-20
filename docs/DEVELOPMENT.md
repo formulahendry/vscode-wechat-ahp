@@ -124,7 +124,11 @@ parked iterator during shutdown. Do not cancel another client's turn when
 disconnecting the extension.
 
 The journal's schema version is independent of the extension version. Newer
-private state may not be readable by an older development build.
+private state may not be readable by an older development build. Journal v3
+migrates v1/v2 credentials, cursors, routes and uncertain-send evidence and adds
+status notices and local observation guards. Those guards are not a telemetry
+outbox: disabled-period events are not buffered or replayed. An older 0.1.1
+build may refuse v3 state rather than overwrite it.
 
 ## Version and change policy
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Best-effort WeChat typing indicators while the bound agent is working, with
+  cancellation when it pauses, finishes, or disconnects.
+- A fixed English notice asking the owner to return to VS Code when confirmation
+  or input is required. Notices are deduplicated per waiting episode and cannot
+  approve tools or expose their details.
+- Usage telemetry distinguishing WeChat and editor-side user inputs, completed
+  agent turns, and logical message-delivery outcomes. This expands collection
+  beyond 0.1.1 basic telemetry without collecting content, account/resource IDs,
+  hashes, message lengths, or delivery/generation durations.
+- Private journal v3 migration preserving credentials, cursors, deduplication and
+  uncertain deliveries; status notices appear separately in Recent Deliveries.
+
 ## [0.1.1] - 2026-09-19
 
 ### Added

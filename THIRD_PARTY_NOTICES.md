@@ -94,3 +94,11 @@ The current `sendmessage` acknowledgement handling follows the upstream
 a successful HTTP response with a JSON object may omit `ret`; explicit nonzero
 `ret` or `errcode` still fails. This indicates API acceptance, not a read receipt.
 Existing uncertain send records are not reclassified as successful or replayed.
+
+Typing indicators follow Tencent's `getconfig`/`sendtyping` wire contracts and
+the reference client's five-second keepalive, inspected on 2026-09-20 at commit
+`43675b66551d12d6853155a7869a50fb12a18a1e` (`src/api/api.ts`,
+`src/api/types.ts`, `src/api/config-cache.ts`, and
+`src/messaging/process-message.ts`). This is a compatible implementation using
+our existing HTTP adapter, not an OpenClaw runtime dependency. Client behavior
+does not guarantee typing-ticket lifetime or visibility in every WeChat client.

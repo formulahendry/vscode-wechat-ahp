@@ -242,6 +242,8 @@ export async function fakeHost(t, options = {}) {
 export async function fakeWeixin(t, batches = [], sendResponse = { ret: 0 }) {
   const sends = [];
   const polls = [];
+  const typings = [];
+  const configs = [];
   const requests = [];
   const server = createServer(async (request, response) => {
     const parts = [];
@@ -255,6 +257,12 @@ export async function fakeWeixin(t, batches = [], sendResponse = { ret: 0 }) {
     } else if (request.url === '/ilink/bot/sendmessage') {
       sends.push(body.msg);
       response.end(JSON.stringify(sendResponse));
+    } else if (request.url === '/ilink/bot/getconfig') {
+      configs.push(body);
+      response.end(JSON.stringify({ ret: 0, typing_ticket: 'TEST-PRIVATE-TYPING-TICKET' }));
+    } else if (request.url === '/ilink/bot/sendtyping') {
+      typings.push(body);
+      response.end();
     } else { response.statusCode = 404; response.end('{"ret":-1}'); }
   });
   server.listen(0, '127.0.0.1');
@@ -269,5 +277,5 @@ export async function fakeWeixin(t, batches = [], sendResponse = { ret: 0 }) {
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   });
-  return { api, sends, polls, requests, batches };
+  return { api, sends, polls, requests, batches, typings, configs };
 }

@@ -18,3 +18,5 @@ export * from './channelState.js';
 export * from './sessionCatalog.js';
 export * from './platform.js';
 export * from './telemetry.js';
+export * from './messageEvents.js';
+export * from './typing.js';

@@ -7,7 +7,9 @@ import type { Host } from './endpoints.js';
 import { Inbox } from './inbox.js';
 import { bindingKey, type Binding, Vault } from './storage.js';
 import type { BotApi } from './weixin.js';
-import type { RuntimeHealth } from './channelState.js';
+import type { AgentStatus, RuntimeHealth } from './channelState.js';
+import { TypingController } from './typing.js';
+import { closingResults, MessageEvents, STORAGE_RESULT_ERROR, type MessageObserver } from './messageEvents.js';
 
 export interface RuntimeOptions {
   binding: Binding;
@@ -20,6 +22,7 @@ export interface RuntimeOptions {
   status(status: string): void;
   failed(message: string): void;
   terminalError?(error: unknown): void;
+  messages?: MessageObserver;
   health?(update: RuntimeHealth): void;
   wait?: typeof pause;
   ackTimeout?: number;
@@ -32,8 +35,11 @@ export class ChannelRuntime {
   private stopWork?: Promise<void>;
   private readonly clientId = randomUUID();
   private sequence = 1;
+  private readonly messages: MessageEvents;
 
-  constructor(private readonly options: RuntimeOptions) {}
+  constructor(private readonly options: RuntimeOptions) {
+    this.messages = new MessageEvents(options.messages, options.log);
+  }
 
   start(): Promise<void> {
     if (this.starting) return this.starting;
@@ -57,8 +63,12 @@ export class ChannelRuntime {
         this.options.failed(diagnostic(error));
       }
     }).finally(async () => {
-      try { await this.options.vault.invalidateReplies(bindingKey(this.options.binding)); }
-      catch (error) { reportTerminal(error); this.options.failed(diagnostic(error)); }
+      const key = bindingKey(this.options.binding);
+      try { this.messages.results(await this.options.vault.invalidateReplies(key)); }
+      catch (error) {
+        this.messages.results(closingResults(this.options.vault.snapshot(), key), STORAGE_RESULT_ERROR());
+        reportTerminal(error); this.options.failed(diagnostic(error));
+      }
       this.options.status('Disconnected');
       this.options.health?.({ receive: 'Stopped', agent: 'Unknown' });
       rejected(new SafeError('Connection cancelled.'));
@@ -88,19 +98,43 @@ export class ChannelRuntime {
       let polling: Promise<void> | undefined;
       let retry: Error | undefined;
       let connectedAt = 0;
+      let typing: TypingController | undefined;
+      let unwatch: (() => void) | undefined;
+      let agent: AgentStatus = 'Unknown';
+      let activityAllowed = false;
+      const updateTyping = () => {
+        if (!typing) return;
+        if (!activityAllowed || signal.aborted) { typing.update('Unknown'); return; }
+        try { this.options.assertAllowed(); }
+        catch { typing.update('Unknown'); return; }
+        const state = this.options.vault.snapshot();
+        typing.update(agent, state.peer?.binding === bindingKey(this.options.binding) ? state.peer.contextToken : undefined);
+      };
       try {
         this.options.assertAllowed();
         this.options.status(attempts ? `Reconnecting (${attempts}/5)` : 'Connecting');
         const host = await this.options.resolveHost();
         signal.throwIfAborted();
         connection = await HostConnection.connect(host, signal, this.clientId, this.options.ackTimeout, () => this.sequence++);
-        const inbox = new Inbox(this.options.vault, this.options.binding, this.options.api, this.options.log);
-        bridge = await Bridge.open(connection, this.options.binding, inbox, signal, this.options.log, this.options.assertAllowed, this.options.assertScope, this.options.health);
+        const inbox = new Inbox(this.options.vault, this.options.binding, this.options.api, this.options.log, this.messages);
+        bridge = await Bridge.open(connection, this.options.binding, inbox, signal, this.options.log,
+          this.options.assertAllowed, this.options.assertScope, update => {
+            if (update.agent) agent = update.agent;
+            this.options.health?.(update);
+            updateTyping();
+          });
         signal.throwIfAborted();
         this.options.assertAllowed();
         connectedAt = Date.now();
         this.options.status('Connected');
         ready();
+        typing = new TypingController({
+          api: this.options.api, ownerId: this.options.vault.snapshot().credentials.ownerId, log: this.options.log,
+        });
+        activityAllowed = true;
+        unwatch = this.options.vault.onDidChange(updateTyping);
+        updateTyping();
+        bridge.enableActivity();
         polling = this.poll(inbox, bridge, signal);
         await Promise.race([
           polling,
@@ -115,11 +149,14 @@ export class ChannelRuntime {
           retry = error;
         }
       } finally {
+        activityAllowed = false;
+        unwatch?.();
+        typing?.update('Unknown');
         this.options.health?.({ receive: 'Stopped', agent: 'Unknown' });
         attempt.abort(new SafeError('Connection attempt ended.'));
-        if (polling) await Promise.allSettled([polling]);
-        try { if (bridge) await bridge.close(); }
-        finally { if (connection) await connection.close(); }
+        try {
+          await Promise.all([bridge?.close(), typing?.dispose(), Promise.allSettled(polling ? [polling] : [])]);
+        } finally { if (connection) await connection.close(); }
       }
       if (retry && !outer.aborted) {
         this.options.status(`Reconnecting (${attempts}/5)`);

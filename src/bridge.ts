@@ -9,7 +9,7 @@ import { boundedString, MAX_TEXT_BYTES, SafeError, withAbort } from './common.js
 import { Inbox, REQUEST_META } from './inbox.js';
 import type { Binding } from './storage.js';
 import { TextSync, visibleText } from './textSync.js';
-import { agentStatus, type RuntimeHealth } from './channelState.js';
+import { agentStatus, type AgentStatus, type RuntimeHealth } from './channelState.js';
 
 export class Bridge {
   private readonly lifetime = new AbortController();
@@ -24,6 +24,9 @@ export class Bridge {
   private heartbeat?: NodeJS.Timeout;
   private closing?: Promise<void>;
   private published = false;
+  private activityEnabled = false;
+  private activityWork: Promise<void> = Promise.resolve();
+  private agent: AgentStatus = 'Unknown';
   private readonly waitingInputs = new Set<string>();
   private readonly stopListener: () => void;
   private fail!: (error: Error) => void;
@@ -50,7 +53,7 @@ export class Bridge {
       ].some(status => status === part.toolCall.status)) this.waitingInputs.add(`tool:${part.toolCall.toolCallId}`);
       if (part.kind === ResponsePartKind.InputRequest && part.response === undefined) this.waitingInputs.add(`input:${part.request.id}`);
     }
-    health({ agent: agentStatus(snapshot.status) });
+    this.reportAgent(snapshot.activeTurn ? this.waitingInputs.size ? 'Awaiting input' : 'Busy' : agentStatus(snapshot.status));
     this.stopListener = connection.onEvent(event => {
       if (event.event.type === 'authRequired') {
         this.stopWith(new SafeError('Agent provider needs authentication. Complete it in VS Code; WeChat cannot approve tools.'));
@@ -131,30 +134,42 @@ export class Bridge {
 
   async deliverPending(signal: AbortSignal): Promise<void> {
     for (const event of this.inbox.pending()) {
-      this.ensureAllowed();
-      signal.throwIfAborted();
-      if (this.connection.containsCredential(event.text) || this.inbox.containsCredential(event.text)) {
-        throw new SafeError('Incoming text contains a private transport credential; inspect and clear the pending journal.');
+      let submitted = false;
+      let acknowledged = false;
+      try {
+        this.ensureAllowed();
+        signal.throwIfAborted();
+        if (this.connection.containsCredential(event.text) || this.inbox.containsCredential(event.text)) {
+          throw new SafeError('Incoming text contains a private transport credential; inspect and clear the pending journal.');
+        }
+        const message: Message = {
+          origin: { kind: MessageKind.User }, text: event.text, _meta: { [REQUEST_META]: event.id },
+        };
+        const busy = this.state.activeTurn !== undefined || (this.state.queuedMessages?.length ?? 0) > 0;
+        const id = randomUUID();
+        await this.inbox.markDispatching(event.id, busy ? undefined : id, busy ? id : undefined);
+        if (busy) await this.sync.queued(id, message);
+        else await this.sync.started(id, message);
+        this.ensureAllowed();
+        signal.throwIfAborted();
+        const action = busy ? {
+          type: ActionType.ChatPendingMessageSet, kind: PendingMessageKind.Queued, id, message,
+        } as const : {
+          type: ActionType.ChatTurnStarted, turnId: id, startedAt: new Date().toISOString(), message,
+        } as const;
+        this.state = chatReducer(this.state, action);
+        submitted = true;
+        await withAbort(this.connection.dispatch(this.binding.chat, action), AbortSignal.any([signal, this.lifetime.signal]));
+        acknowledged = true;
+        await this.inbox.accepted(event.id, busy ? undefined : id);
+        this.log(busy ? 'WeChat original text queued in the existing chat.' : 'WeChat original text accepted into the existing chat.');
+      } catch (error) {
+        if (acknowledged) await this.inbox.result(event.id, 'uncertain', error);
+        else if (!submitted && !signal.aborted || error instanceof SafeError && error.kind === 'ahp-rejected') {
+          await this.inbox.result(event.id, 'failed', error);
+        }
+        throw error;
       }
-      const message: Message = {
-        origin: { kind: MessageKind.User }, text: event.text, _meta: { [REQUEST_META]: event.id },
-      };
-      const busy = this.state.activeTurn !== undefined || (this.state.queuedMessages?.length ?? 0) > 0;
-      const id = randomUUID();
-      await this.inbox.markDispatching(event.id, busy ? undefined : id, busy ? id : undefined);
-      if (busy) await this.sync.queued(id, message);
-      else await this.sync.started(id, message);
-      this.ensureAllowed();
-      signal.throwIfAborted();
-      const action = busy ? {
-        type: ActionType.ChatPendingMessageSet, kind: PendingMessageKind.Queued, id, message,
-      } as const : {
-        type: ActionType.ChatTurnStarted, turnId: id, startedAt: new Date().toISOString(), message,
-      } as const;
-      this.state = chatReducer(this.state, action);
-      await withAbort(this.connection.dispatch(this.binding.chat, action), AbortSignal.any([signal, this.lifetime.signal]));
-      await this.inbox.accepted(event.id, busy ? undefined : id);
-      this.log(busy ? 'WeChat original text queued in the existing chat.' : 'WeChat original text accepted into the existing chat.');
     }
     this.requestFlush();
   }
@@ -213,7 +228,7 @@ export class Bridge {
         if (!turn || turn.id !== action.turnId) return;
         this.state = { ...this.state, activeTurn: undefined };
         this.waitingInputs.clear();
-        this.health({ agent: 'Idle' });
+        this.reportAgent('Idle');
         this.enqueue(() => this.sync.complete(turn));
         break;
       }
@@ -222,7 +237,7 @@ export class Bridge {
         if (this.state.activeTurn?.id === action.turnId) {
           this.state = { ...this.state, activeTurn: undefined };
           this.waitingInputs.clear();
-          this.health({ agent: action.type === ActionType.ChatError ? 'Error' : 'Idle' });
+          this.reportAgent(action.type === ActionType.ChatError ? 'Error' : 'Idle');
         }
         this.enqueue(() => this.sync.cancel(action.turnId));
         break;
@@ -276,8 +291,19 @@ export class Bridge {
     this.lifetime.signal.throwIfAborted();
   }
 
-  private reportAgent(): void {
-    this.health({ agent: this.state.activeTurn ? this.waitingInputs.size ? 'Awaiting input' : 'Busy' : 'Idle' });
+  enableActivity(): void {
+    this.activityEnabled = true;
+    this.reportAgent(this.agent);
+  }
+
+  private reportAgent(agent: AgentStatus = this.state.activeTurn ? this.waitingInputs.size ? 'Awaiting input' : 'Busy' : 'Idle'): void {
+    this.agent = agent;
+    this.health({ agent });
+    if (this.activityEnabled && !this.lifetime.signal.aborted) {
+      const work = this.sync.setActivity(agent === 'Awaiting input', this.state.activeTurn?.id)
+        .then(() => this.requestFlush());
+      this.activityWork = Promise.all([this.activityWork, work]).then(() => undefined);
+    }
   }
 
   private setWaiting(key: string, waiting: boolean): void {
@@ -300,12 +326,15 @@ export class Bridge {
   }
 
   private async closeOnce(): Promise<void> {
+    this.activityEnabled = false;
+    this.sync.pauseActivity();
     this.lifetime.abort();
     clearInterval(this.heartbeat);
     this.stopListener();
     await this.connection.client.unsubscribe(this.binding.chat);
     await this.subscription.close();
     await this.loop;
+    await this.activityWork;
     await this.work;
     await this.flushing;
     if (this.published && this.connection.client.connectionState.status === 'connected') {

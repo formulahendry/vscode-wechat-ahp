@@ -1,5 +1,5 @@
 {
-  "description": "WeChat AHP telemetry is enabled in all extension modes, including F5/development and tests. Logical event names are namespaced by the VS Code telemetry logger. Global all permits usage and errors; error permits errors only; crash/off permit neither. Host-enforced logging-only mode, including the official VS Code extension test host, is respected. No message, account, binding, resource, path, credential, or raw error data is collected.",
+  "description": "WeChat AHP telemetry is enabled in all extension modes, including F5/development and tests. Logical event names are namespaced by the VS Code telemetry logger. Global all permits usage (including message/turn lifecycle counts) and errors; error permits categorized errors only; crash/off permit neither. Host-enforced logging-only mode, including the official VS Code extension test host, is respected. No message content, account/binding/resource identifiers, paths, credentials or raw errors are collected. Message events have no identifiers/hashes, lengths, segment counts or delivery/generation durations.",
   "common": {
     "common.extname": "Extension name.",
     "common.extversion": "Extension version.",
@@ -27,7 +27,11 @@
     "metadata": "Application Insights adds the event timestamp, SDK version, event type and ingestion-resource identifier. No custom tags or identifiers are added."
   },
   "fields": {
-    "outcome": { "type": "string", "values": ["success", "cancelled", "failed"] },
+    "outcome": { "type": "string", "values": ["success", "cancelled", "failed", "host_accepted", "api_accepted", "uncertain"] },
+    "has_reply": {
+      "type": "string", "values": ["true", "false"],
+      "description": "Boolean serialized as a string: whether a completed tracked AHP turn contains nonempty visible Markdown. Not the content or length."
+    },
     "error_category": {
       "type": "string",
       "values": ["auth", "business", "protocol", "transport", "storage", "delivery", "lock", "ahp-rpc", "ahp-rejected", "ambiguous", "network", "timeout", "http", "local", "unexpected"]
@@ -38,6 +42,24 @@
     }
   },
   "events": {
+    "wechatAHP.message.wechatUser": { "channel": "usage", "description": "New validated owner input committed to the inbox, after deduplication." },
+    "wechatAHP.message.vscodeUser": { "channel": "usage", "description": "New editor-side AHP User input registered for sync, excluding correlated WeChat echoes; not proof of the originating client application." },
+    "wechatAHP.agent.turnCompleted": { "channel": "usage", "properties": ["has_reply"], "description": "One tracked successful AHP turn completion, independent of forwarding. No streaming/tool/reasoning events." },
+    "wechatAHP.message.wechatUser.result": {
+      "channel": "usage", "properties": ["outcome", "error_category"],
+      "outcomes": ["host_accepted", "failed", "uncertain", "cancelled"],
+      "description": "Logical input delivery to AHP, including queued acceptance. Optional safe error category; no message identifiers or measurements."
+    },
+    "wechatAHP.message.vscodeUser.result": {
+      "channel": "usage", "properties": ["outcome", "error_category"],
+      "outcomes": ["api_accepted", "failed", "uncertain", "cancelled"],
+      "description": "Logical editor-input forwarding result. All parts must be accepted for api_accepted; not a read receipt."
+    },
+    "wechatAHP.message.agentReply.result": {
+      "channel": "usage", "properties": ["outcome", "error_category"],
+      "outcomes": ["api_accepted", "failed", "uncertain", "cancelled"],
+      "description": "Completed reply forwarding result, separate from turn completion. No empty-reply, status-notice or per-segment events."
+    },
     "extension.activated": { "channel": "usage", "measurements": ["duration_ms"] },
     "wechatAHP.login": { "channel": "usage" },
     "wechatAHP.selectChat": { "channel": "usage" },

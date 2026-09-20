@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { hash, VERSION, withAbort } from '../.test-build/core.mjs';
-import { binding, credentials, MemorySecrets, waitFor } from './helpers.mjs';
+import { hash, Inbox, Vault, VERSION, withAbort } from '../.test-build/core.mjs';
+import { binding, credentials, message, MemorySecrets, signal, waitFor } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 import { fakeTelemetry, loadTelemetryExtension } from './telemetryHelpers.mjs';
 
@@ -52,6 +52,24 @@ function harness() {
     },
   };
 }
+
+test('manual Clear Pending reports a cancelled unsent input once without replay', async () => {
+  const h = harness();
+  const store = await Vault.create(h.secrets, credentials);
+  const inbox = new Inbox(store, binding, {}, () => {});
+  await inbox.accept({ msgs: [message('clear', 'PRIVATE-INBOUND')] }, signal());
+  h.stub.window.showWarningMessage = async () => 'Close Pending Routes';
+  try {
+    h.extension.activate(h.context);
+    await h.invoke('clearPending');
+    await h.invoke('clearPending');
+    assert.deepEqual(h.events.filter(event => event.name.startsWith('wechatAHP.message.')), [{
+      channel: 'usage', name: 'wechatAHP.message.wechatUser.result', properties: { outcome: 'cancelled' }, measurements: undefined,
+    }]);
+    assert.equal(h.secrets.state().messages[0].delivery, 'closed');
+    assert.deepEqual(h.errors, []);
+  } finally { await h.close(); }
+});
 
 test('all extension modes use the same reporter and global consent; activation errors use a safe category', async () => {
   for (const mode of [undefined, 1, 2, 3]) {

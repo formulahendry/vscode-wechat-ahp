@@ -1,7 +1,7 @@
 import { chunks } from './common.js';
 
-export function presentMessage(role: 'user' | 'assistant', text: string): string[] {
-  if (role === 'assistant') return chunks(text);
+export function presentMessage(role: 'user' | 'assistant' | 'status', text: string): string[] {
+  if (role !== 'user') return chunks(text);
   const prefix = '[VS Code User]\n';
   const parts = chunks(text, 3500 - Buffer.byteLength(prefix));
   if (parts.length === 1) return [prefix + parts[0]];

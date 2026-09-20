@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink, rmdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { bindingKey, Vault, SECRET_KEY, VERSION, withAbort } from '../.test-build/core.mjs';
+import { bindingKey, Vault, SECRET_KEY, VERSION, WAITING_NOTICE, withAbort } from '../.test-build/core.mjs';
 import { binding, credentials, fakeHost, fakeWeixin, message, MemorySecrets, waitFor, registryFixtureDirectories, registryEnvironment } from './helpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 import { fakeTelemetry, loadTelemetryExtension } from './telemetryHelpers.mjs';
@@ -81,9 +81,11 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     }
     if (endpoint.endsWith('/sendmessage')) {
       await weixin.api.send(body.msg, options.signal);
-      await withAbort(sendResponseReady, options.signal);
+      if (body.msg.item_list[0].text_item.text !== WAITING_NOTICE) await withAbort(sendResponseReady, options.signal);
       return new Response('{}');
     }
+    if (endpoint.endsWith('/getconfig')) return new Response(JSON.stringify({ ret: 0, typing_ticket: 'TEST-PRIVATE-TYPING-TICKET' }));
+    if (endpoint.endsWith('/sendtyping')) return new Response('');
     throw new Error('Unexpected non-fixture API operation');
   };
   try {
@@ -128,11 +130,11 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     });
     permitConnect = true;
     await commands.get('wechatAHP.connect')();
-    assert.equal(telemetry.events.at(-1).name, 'wechatAHP.connect.result');
-    assert.equal(telemetry.events.at(-1).properties.outcome, 'success');
+    assert.equal(telemetry.events.findLast(e => e.name === 'wechatAHP.connect.result').properties.outcome, 'success');
     const afterConnect = telemetry.events.length;
     await commands.get('wechatAHP.connect')();
-    assert.deepEqual(telemetry.events.slice(afterConnect).map(e => e.name), ['wechatAHP.connect'], 'no-op is not another connection success');
+    assert.deepEqual(telemetry.events.slice(afterConnect).filter(e => e.name.startsWith('wechatAHP.connect')).map(e => e.name),
+      ['wechatAHP.connect'], 'no-op is not another connection success');
     await waitFor(() => host.actions.some(item => item.action.type === 'chat/turnStarted'));
     const current = () => connection.getChildren();
     assert.equal(contexts.get('wechatAHP.active'), true);
@@ -141,21 +143,28 @@ test('native views reuse scoped controller actions, stay read-only while browsin
     const pending = host.tool({ confirmed: null });
     const secondPending = host.tool({ confirmed: null });
     await waitFor(() => current().find(row => row.id === 'agent').value === 'Awaiting input');
+    await waitFor(() => weixin.sends.some(message => message.item_list[0].text_item.text === WAITING_NOTICE));
+    await waitFor(() => secrets.state().outbox.some(entry => entry.role === 'status' && entry.status === 'sent'));
+    assert.equal(weixin.sends.filter(message => message.item_list[0].text_item.text === WAITING_NOTICE).length, 1);
     host.emit({ type: 'chat/toolCallConfirmed', turnId: pending.turn, toolCallId: pending.toolCallId, approved: true, confirmed: 'user-action' });
     await waitFor(() => host.state.activeTurn.responseParts.filter(part => part.kind === 'toolCall' && part.toolCall.status === 'pending-confirmation').length === 1);
     assert.equal(current().find(row => row.id === 'agent').value, 'Awaiting input');
     host.emit({ type: 'chat/toolCallConfirmed', turnId: secondPending.turn, toolCallId: secondPending.toolCallId, approved: true, confirmed: 'user-action' });
     await waitFor(() => current().find(row => row.id === 'agent').value === 'Busy');
     host.answer('PRIVATE-ASSISTANT-BODY');
-    await waitFor(() => weixin.sends.length === 1);
+    await waitFor(() => weixin.sends.some(message => message.item_list[0].text_item.text === 'PRIVATE-ASSISTANT-BODY'));
     await waitFor(() => current().find(row => row.id === 'agent').value === 'Idle');
     // Request arrival precedes acknowledgement and the journal/UI update.
     assert.match(current().find(row => row.id === 'send').value, /^Sending/);
     releaseSendResponse();
-    await waitFor(() => current().find(row => row.id === 'recent').children[0]?.value.startsWith('API accepted'));
+    await waitFor(() => secrets.state().outbox.some(entry => entry.role === 'assistant' && entry.status === 'sent'));
     sessionsView.setVisible(false); connectionView.setVisible(false);
     assert.equal(contexts.get('wechatAHP.active'), true, 'hiding views must not stop sync');
-    assert.equal(telemetry.events.length, afterConnect + 1, 'polling, messages and view updates must not generate telemetry');
+    const messageEvents = telemetry.events.filter(event => event.name.startsWith('wechatAHP.message.') || event.name === 'wechatAHP.agent.turnCompleted');
+    assert.deepEqual(messageEvents.map(event => event.name), [
+      'wechatAHP.message.wechatUser', 'wechatAHP.message.wechatUser.result',
+      'wechatAHP.agent.turnCompleted', 'wechatAHP.message.agentReply.result',
+    ], 'one input/completion/result sequence; no typing, notice or polling events');
     await commands.get('wechatAHP.copyDiagnostics')();
     const safe = JSON.stringify({ rows: current(), tree: [hostNode, sessionNode, chatNode], diagnostics: clipboard.at(-1) });
     for (const value of [credentials.token, credentials.ownerId, host.target.connectionToken, 'TEST-PRIVATE-CONTEXT-ui', 'PRIVATE-INBOUND-BODY', 'PRIVATE-ASSISTANT-BODY']) {

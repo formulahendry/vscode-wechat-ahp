@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { COMMAND_NAMES, SafeError, Telemetry, telemetryFetcher } from '../.test-build/core.mjs';
+import { COMMAND_NAMES, MESSAGE_EVENTS, SafeError, Telemetry, telemetryFetcher } from '../.test-build/core.mjs';
 import { fakeTelemetry } from './telemetryHelpers.mjs';
 import { addNativeViewApi } from './vscodeMock.mjs';
 
@@ -23,6 +23,7 @@ test('event declaration exactly matches the manifest commands and closed result/
     ...commands, ...commands.map(name => `${name}.error`),
     ...['login', 'connect', 'bindAndConnect'].map(name => `wechatAHP.${name}.result`),
     'extension.activated', 'extension.activation.error', 'wechatAHP.channel.error',
+    ...MESSAGE_EVENTS,
   ].toSorted());
   const { service, events } = setup();
   for (const name of COMMAND_NAMES) {
@@ -196,13 +197,22 @@ test('official SDK live logger levels and serialized wire payload stay offline w
     level = 'error'; changes.fire();
     assert.equal(reporter.telemetryLevel, 'error');
     service.command('connect').fail(new SafeError('PRIVATE-MESSAGE', false, 'auth'));
+    service.messages.result('wechatUser', 'uncertain', new SafeError('PRIVATE-MESSAGE', false, 'transport'));
     level = 'all'; changes.fire();
     service.command('focus');
+    service.messages.input('wechatUser');
+    service.messages.input('vscodeUser');
+    service.messages.completed(true);
+    service.messages.result('wechatUser', 'host_accepted');
+    service.messages.result('vscodeUser', 'api_accepted');
+    service.messages.result('agentReply', 'uncertain', new SafeError('PRIVATE-TYPING-TICKET', false, 'delivery'));
     loggingOnly = true;
     service.command('status').fail(new Error('PRIVATE-LOGGING-ONLY'));
+    service.messages.input('wechatUser');
     loggingOnly = false;
     level = 'off'; changes.fire();
     service.command('login').fail(new Error('PRIVATE-STACK'));
+    service.messages.completed(false);
     level = 'all'; changes.fire();
     await new Promise(setImmediate);
     await sender.flush();
@@ -210,9 +220,13 @@ test('official SDK live logger levels and serialized wire payload stay offline w
     assert.equal(initialization.ignoreUnhandledErrors, true);
     assert.deepEqual(packets.map(p => p.data.baseData.name).toSorted(), [
       'wechat-ahp/wechatAHP.connect.error', 'wechat-ahp/wechatAHP.focus',
-    ]);
+      ...MESSAGE_EVENTS.map(name => `wechat-ahp/${name}`),
+    ].toSorted());
+    for (const packet of packets.filter(packet => MESSAGE_EVENTS.some(name => packet.data.baseData.name.endsWith(`/${name}`)))) {
+      assert.deepEqual(packet.data.baseData.measurements ?? {}, {});
+    }
     const serialized = JSON.stringify(packets);
-    for (const value of ['PRIVATE-MESSAGE', 'PRIVATE-STACK', 'PRIVATE-LOGGING-ONLY', '37e731fc-21aa-4ee5-987a-c3eea6995bb9']) {
+    for (const value of ['PRIVATE-MESSAGE', 'PRIVATE-STACK', 'PRIVATE-LOGGING-ONLY', 'PRIVATE-TYPING-TICKET', '37e731fc-21aa-4ee5-987a-c3eea6995bb9']) {
       assert.ok(!serialized.includes(value));
     }
     assert.ok(serialized.includes('SDK-MACHINE'));

@@ -16,6 +16,7 @@ import { initialChannelState, privateSummary, sendStatus, type ChannelState } fr
 import { SessionCatalog, type CatalogChat } from './sessionCatalog.js';
 import { assertLocalDesktop, isLocalDesktop } from './platform.js';
 import type { CommandName, CommandTelemetry, Telemetry } from './telemetry.js';
+import { closingResults, MessageEvents, type DeliveryResult } from './messageEvents.js';
 
 const BINDING_KEY = 'wechat-ahp.binding.v1';
 export class ChannelController {
@@ -373,7 +374,7 @@ export class ChannelController {
     if (!binding) throw new SafeError('Select Existing Host / Session / Chat before connecting.');
     if (binding.workspace !== workspace) throw new SafeError('Binding belongs to another workspace. Open that trusted local workspace or select a new binding.');
     if (await vscode.window.showWarningMessage(
-      `Enable TWO-WAY TEXT SYNC with your QR-confirmed WeChat owner?\n${binding.hostId}\n${binding.session}\n${binding.chat}\nNew VS Code user messages and completed assistant text from THIS chat will automatically be sent to WeChat. WeChat text enters this chat unchanged. No history, reasoning, tools, attachments or other chats are copied. Tool approvals stay in VS Code. A message from WeChat is needed to establish reply context.`,
+      `Enable TWO-WAY TEXT SYNC with your QR-confirmed WeChat owner?\n${binding.hostId}\n${binding.session}\n${binding.chat}\nNew VS Code user messages and completed assistant text from THIS chat will automatically be sent to WeChat. WeChat text enters this chat unchanged. No history, reasoning, tools, attachments or other chats are copied. WeChat may show typing and receive a fixed notice when VS Code input is needed. Tool approvals stay in VS Code. A message from WeChat is needed to establish reply context.`,
       { modal: true }, 'Connect',
     ) !== 'Connect') { attempt.finish('cancelled'); return; }
     signal.throwIfAborted();
@@ -395,6 +396,7 @@ export class ChannelController {
         log: message => this.log(message), status: phase => this.setStatus(phase),
         health: update => this.publish(update),
         terminalError: error => this.telemetry.error('wechatAHP.channel.error', error),
+        messages: this.telemetry.messages,
         failed: message => {
           this.log(message);
           this.publish({ lastError: message });
@@ -455,8 +457,10 @@ export class ChannelController {
         { modal: true }, 'Close Pending Routes',
       ) !== 'Close Pending Routes') return;
       signal.throwIfAborted();
+      let results: DeliveryResult[] = [];
       await vault.update(next => {
         signal.throwIfAborted();
+        results = closingResults(next, undefined, true);
         for (const message of next.messages) {
           message.delivery = 'closed';
           message.contextToken = '';
@@ -474,6 +478,7 @@ export class ChannelController {
         next.sync = undefined;
         next.peer = undefined;
       });
+      new MessageEvents(this.telemetry.messages, message => this.log(message)).results(results);
       this.log('Pending routes explicitly closed by user; no messages resent and send history retained.');
     });
   }

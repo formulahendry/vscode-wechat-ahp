@@ -1,5 +1,6 @@
 import type { CustomFetcher, TelemetryReporter } from '@vscode/extension-telemetry';
 import { SafeError } from './common.js';
+import type { DeliveryOutcome, MessageObserver, MessageSource, UserSource } from './messageEvents.js';
 
 export const COMMAND_NAMES = [
   'login', 'selectChat', 'connect', 'disconnect', 'status', 'logout', 'clearPending',
@@ -16,7 +17,12 @@ const ERROR_CATEGORIES = new Set([
 type Outcome = 'success' | 'cancelled' | 'failed';
 type Reporter = Pick<TelemetryReporter, 'telemetryLevel' | 'sendTelemetryEvent' | 'sendTelemetryErrorEvent' | 'dispose'>;
 type ErrorEvent = `wechatAHP.${CommandName}.error` | 'wechatAHP.channel.error' | 'extension.activation.error';
-type UsageEvent = `wechatAHP.${CommandName}` | `wechatAHP.${'login' | 'connect' | 'bindAndConnect'}.result` | 'extension.activated';
+export const MESSAGE_EVENTS = [
+  'wechatAHP.message.wechatUser', 'wechatAHP.message.vscodeUser', 'wechatAHP.agent.turnCompleted',
+  'wechatAHP.message.wechatUser.result', 'wechatAHP.message.vscodeUser.result', 'wechatAHP.message.agentReply.result',
+] as const;
+type UsageEvent = `wechatAHP.${CommandName}` | `wechatAHP.${'login' | 'connect' | 'bindAndConnect'}.result`
+  | 'extension.activated' | typeof MESSAGE_EVENTS[number];
 
 function duration(value?: number): Record<string, number> | undefined {
   return value !== undefined && Number.isFinite(value) && value >= 0
@@ -55,6 +61,28 @@ export class Telemetry {
   }
 
   activated(elapsed: number): void { this.send(false, 'extension.activated', undefined, elapsed); }
+
+  readonly messages: MessageObserver = {
+    input: (source: UserSource) => {
+      if (source !== 'wechatUser' && source !== 'vscodeUser') { this.warn(); return; }
+      this.send(false, `wechatAHP.message.${source}`);
+    },
+    completed: (hasReply: boolean) => {
+      if (typeof hasReply !== 'boolean') { this.warn(); return; }
+      this.send(false, 'wechatAHP.agent.turnCompleted', { has_reply: String(hasReply) });
+    },
+    result: (source: MessageSource, outcome: DeliveryOutcome, error?: unknown) => {
+      if (!['wechatUser', 'vscodeUser', 'agentReply'].includes(source)
+        || !['host_accepted', 'api_accepted', 'failed', 'uncertain', 'cancelled'].includes(outcome)
+        || (outcome === 'host_accepted' && source !== 'wechatUser')
+        || (outcome === 'api_accepted' && source === 'wechatUser')) { this.warn(); return; }
+      const properties: Record<string, string> = { outcome };
+      if (error !== undefined && (outcome === 'failed' || outcome === 'uncertain')) {
+        properties.error_category = error instanceof SafeError && ERROR_CATEGORIES.has(error.kind) ? error.kind : 'unexpected';
+      }
+      this.send(false, `wechatAHP.message.${source}.result`, properties);
+    },
+  };
 
   error(event: ErrorEvent, error: unknown, elapsed?: number): void {
     const allowed = event === 'extension.activation.error' || event === 'wechatAHP.channel.error'

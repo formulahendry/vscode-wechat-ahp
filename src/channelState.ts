@@ -12,7 +12,7 @@ export interface RuntimeHealth {
 export interface DeliverySummary {
   id: string;
   direction: 'WeChat -> VS Code' | 'VS Code -> WeChat';
-  role: 'User' | 'Assistant';
+  role: 'User' | 'Assistant' | 'Status';
   status: string;
   time?: number;
   confirmedParts?: number;
@@ -68,7 +68,7 @@ export function privateSummary(state: PrivateState | undefined, binding?: Bindin
     })),
     ...outbox.map(entry => ({
       id: `out-${entry.id}`, direction: 'VS Code -> WeChat' as const,
-      role: entry.role === 'user' ? 'User' as const : 'Assistant' as const,
+      role: entry.role === 'user' ? 'User' as const : entry.role === 'status' ? 'Status' as const : 'Assistant' as const,
       status: entry.status === 'sent' ? 'API accepted (not a read receipt)' : entry.status,
       time: entry.updatedAt ?? entry.createdAt, confirmedParts: entry.sent,
     })),

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { apiBase, hash, identifier, MAX_PENDING, MAX_RECORDS, MAX_SEEN, MAX_TEXT_BYTES, SafeError } from './common.js';
 import { isChannelResourceUri } from './resourceUri.js';
+import { closingResults, type DeliveryResult } from './messageEvents.js';
 
 const bytes = (max: number) => z.string().refine(s => s.isWellFormed() && Buffer.byteLength(s) <= max);
 const id = z.string().refine(identifier);
@@ -45,7 +46,8 @@ const messageSchema = z.object({
     status: z.enum(['sending', 'sent', 'uncertain']),
   }).strict().optional(),
 }).strict();
-export type StoredMessage = z.infer<typeof messageSchema>;
+const currentMessageSchema = messageSchema.extend({ resultRecorded: z.boolean().optional() });
+export type StoredMessage = z.infer<typeof currentMessageSchema>;
 const legacyStateSchema = z.object({
   version: z.literal(1),
   credentials: credentialsSchema,
@@ -63,7 +65,8 @@ const syncTurnSchema = z.object({
   route: routeSchema.optional(),
   complete: z.boolean(),
 }).strict();
-export type SyncTurn = z.infer<typeof syncTurnSchema>;
+const currentTurnSchema = syncTurnSchema.extend({ completionRecorded: z.boolean().optional() });
+export type SyncTurn = z.infer<typeof currentTurnSchema>;
 const outgoingSchema = z.object({
   id: digest,
   binding: digest,
@@ -78,8 +81,12 @@ const outgoingSchema = z.object({
   createdAt: z.number().finite().optional(),
   updatedAt: z.number().finite().optional(),
 }).strict();
-export type OutgoingText = z.infer<typeof outgoingSchema>;
-const stateSchema = z.object({
+const currentOutgoingSchema = outgoingSchema.extend({
+  role: z.enum(['user', 'assistant', 'status']),
+  resultRecorded: z.boolean().optional(),
+});
+export type OutgoingText = z.infer<typeof currentOutgoingSchema>;
+const versionTwoSchema = z.object({
   version: z.literal(2),
   credentials: credentialsSchema,
   cursor: bytes(64 * 1024),
@@ -92,7 +99,20 @@ const stateSchema = z.object({
     seen: z.array(digest).max(MAX_SEEN),
   }).strict().optional(),
   outbox: z.array(outgoingSchema).max(256),
-}).strict().refine(s => s.messages.filter(m => m.delivery !== 'closed' && m.outbound?.status !== 'sent').length <= MAX_PENDING);
+}).strict();
+const stateSchema = versionTwoSchema.extend({
+  version: z.literal(3),
+  messages: z.array(currentMessageSchema).max(MAX_RECORDS),
+  sync: z.object({
+    binding: digest, runId: z.string().uuid(),
+    turns: z.array(currentTurnSchema).max(128),
+    seen: z.array(digest).max(MAX_SEEN),
+    waiting: z.object({ episodeId: z.string().uuid(), turnId: id.optional(), notified: z.boolean() }).strict().optional(),
+  }).strict().optional(),
+  outbox: z.array(currentOutgoingSchema).max(272),
+}).strict().refine(s => s.messages.filter(m => m.delivery !== 'closed' && m.outbound?.status !== 'sent').length <= MAX_PENDING
+  && s.outbox.filter(entry => entry.role !== 'status').length <= 256
+  && s.outbox.filter(entry => entry.role === 'status').length <= 16);
 export type PrivateState = z.infer<typeof stateSchema>;
 
 export interface Secrets {
@@ -108,7 +128,7 @@ export function bindingKey(binding: Binding): string {
 }
 
 export function newState(credentials: Credentials): PrivateState {
-  return parseState({ version: 2, credentials, cursor: '', seen: [], messages: [], outbox: [] });
+  return parseState({ version: 3, credentials, cursor: '', seen: [], messages: [], outbox: [] });
 }
 
 function parseState(value: unknown): PrivateState {
@@ -116,6 +136,19 @@ function parseState(value: unknown): PrivateState {
     const legacy = legacyStateSchema.safeParse(value);
     if (!legacy.success) throw new SafeError('Invalid legacy private channel state; credentials and journal were not overwritten.');
     value = { ...legacy.data, version: 2, outbox: [] };
+  }
+  if (typeof value === 'object' && value !== null && 'version' in value && value.version === 2) {
+    const legacy = versionTwoSchema.safeParse(value);
+    if (!legacy.success) throw new SafeError('Invalid v2 private channel state; credentials and journal were not overwritten.');
+    value = {
+      ...legacy.data, version: 3,
+      messages: legacy.data.messages.map(message => ({
+        ...message, resultRecorded: message.delivery === 'accepted' || message.delivery === 'closed' || !!message.outbound,
+      })),
+      outbox: legacy.data.outbox.map(entry => ({
+        ...entry, resultRecorded: ['sent', 'uncertain', 'cancelled'].includes(entry.status),
+      })),
+    };
   }
   const parsed = stateSchema.safeParse(value);
   if (!parsed.success) throw new SafeError('Invalid private channel state. Polling stopped; preserve SecretStorage for recovery.');
@@ -171,8 +204,10 @@ export class Vault {
     return work;
   }
 
-  async invalidateReplies(binding: string): Promise<void> {
+  async invalidateReplies(binding: string): Promise<DeliveryResult[]> {
+    let results: DeliveryResult[] = [];
     await this.update(next => {
+      results = closingResults(next, binding);
       for (const message of next.messages) {
         if (message.binding !== binding) continue;
         if (message.outbound?.status === 'sending') message.outbound.status = 'uncertain';
@@ -193,5 +228,6 @@ export class Vault {
       }
       if (next.sync?.binding === binding) next.sync = undefined;
     });
+    return results;
   }
 }

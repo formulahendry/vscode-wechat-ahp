@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { parse } from 'lossless-json';
-import { apiBase, boundedString, DEFAULT_BASE, record, SafeError, VERSION } from './common.js';
+import { apiBase, boundedString, DEFAULT_BASE, identifier, record, SafeError, VERSION, withAbort } from './common.js';
 
 export interface Updates {
   msgs: unknown[];
@@ -20,6 +20,8 @@ export interface SendMessage {
 export interface BotApi {
   updates(cursor: string, signal: AbortSignal): Promise<Updates>;
   send(message: SendMessage, signal: AbortSignal): Promise<void>;
+  getTypingTicket?(ownerId: string, contextToken: string, signal: AbortSignal): Promise<string | undefined>;
+  sendTyping?(ownerId: string, ticket: string, status: 1 | 2, signal: AbortSignal): Promise<void>;
 }
 
 export function parseWire(text: string): unknown {
@@ -66,32 +68,38 @@ export class WeixinApi implements BotApi {
       if (this.token) headers.Authorization = `Bearer ${this.token}`;
     }
     const timeout = AbortSignal.timeout(timeoutMs);
+    const requestSignal = AbortSignal.any([signal, timeout]);
+    const allowEmpty = endpoint === 'ilink/bot/sendtyping' && body !== undefined;
     try {
-      const response = await this.fetcher(`${this.base}/${endpoint}`, {
+      const response = await withAbort(this.fetcher(`${this.base}/${endpoint}`, {
         method: body === undefined ? 'GET' : 'POST', headers,
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-        signal: AbortSignal.any([signal, timeout]), redirect: 'error',
-      });
+        signal: requestSignal, redirect: 'error',
+      }), requestSignal);
       if (!response.ok) {
-        await response.body?.cancel();
+        void response.body?.cancel().catch(() => {});
         if (response.status === 401 || response.status === 403) {
           throw new SafeError('Weixin authorization failed. Sign in with QR again.', false, 'auth');
         }
         throw new SafeError(`Weixin HTTP ${response.status}.`, response.status === 429 || response.status >= 500, 'http');
       }
-      if (!response.body) throw new SafeError('Empty Weixin response.', false, 'protocol');
+      if (!response.body) {
+        if (allowEmpty) return {};
+        throw new SafeError('Empty Weixin response.', false, 'protocol');
+      }
       const reader = response.body.getReader();
       const parts: Uint8Array[] = [];
       let length = 0;
       try {
         while (true) {
-          const part = await reader.read();
+          const part = await withAbort(reader.read(), requestSignal);
           if (part.done) break;
           length += part.value.byteLength;
           if (length > 1024 * 1024) throw new SafeError('Weixin response exceeds 1 MiB.', false, 'protocol');
           parts.push(part.value);
         }
-      } finally { await reader.cancel(); }
+      } finally { void reader.cancel().catch(() => {}); }
+      if (allowEmpty && length === 0) return {};
       let value: unknown;
       try { value = parseWire(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(parts))); }
       catch { throw new SafeError('Malformed Weixin JSON.', false, 'protocol'); }
@@ -129,6 +137,32 @@ export class WeixinApi implements BotApi {
     // Tencent's sendMessage client permits omitted ret on successful HTTP + JSON.
     // request still rejects malformed JSON, HTTP failures and every nonzero business code.
     await this.request('ilink/bot/sendmessage', { msg, base_info: baseInfo() }, signal);
+  }
+
+  async getTypingTicket(ownerId: string, contextToken: string, signal: AbortSignal): Promise<string | undefined> {
+    if (!identifier(ownerId) || !boundedString(contextToken, 8192) || !contextToken.trim()) {
+      throw new SafeError('Invalid Weixin typing recipient or context.', false, 'protocol');
+    }
+    const response = await this.request('ilink/bot/getconfig', {
+      ilink_user_id: ownerId, context_token: contextToken, base_info: baseInfo(),
+    }, signal, 3000);
+    if (response.ret !== 0) {
+      throw new SafeError('Weixin typing configuration did not report success.', false, 'protocol');
+    }
+    if (response.typing_ticket === undefined) return undefined;
+    if (!boundedString(response.typing_ticket, 8192) || !response.typing_ticket.trim()) {
+      throw new SafeError('Invalid Weixin typing ticket.', false, 'protocol');
+    }
+    return response.typing_ticket;
+  }
+
+  async sendTyping(ownerId: string, ticket: string, status: 1 | 2, signal: AbortSignal): Promise<void> {
+    if (!identifier(ownerId) || !boundedString(ticket, 8192) || !ticket.trim() || (status !== 1 && status !== 2)) {
+      throw new SafeError('Invalid Weixin typing request.', false, 'protocol');
+    }
+    await this.request('ilink/bot/sendtyping', {
+      ilink_user_id: ownerId, typing_ticket: ticket, status, base_info: baseInfo(),
+    }, signal, 3000);
   }
 }
 

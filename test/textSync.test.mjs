@@ -22,7 +22,7 @@ test('v1 journal migration preserves credentials, cursor and legacy uncertain se
     }],
   }));
   const loaded = await Vault.load(secrets);
-  assert.equal(loaded.snapshot().version, 2);
+  assert.equal(loaded.snapshot().version, 3);
   assert.equal(loaded.snapshot().cursor, 'keep-cursor');
   assert.equal(loaded.snapshot().credentials.token, credentials.token);
   const api = { send: async () => assert.fail('migration must not resend') };
@@ -30,7 +30,7 @@ test('v1 journal migration preserves credentials, cursor and legacy uncertain se
   await sync.open(chatState());
   await sync.flush(signal());
   assert.equal(secrets.state().messages[0].outbound.status, 'uncertain');
-  assert.equal(secrets.state().version, 2);
+  assert.equal(secrets.state().version, 3);
 });
 
 test('sent text and historical snapshots are never replayed after reconnect', async () => {

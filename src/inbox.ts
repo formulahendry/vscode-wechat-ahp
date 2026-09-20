@@ -2,6 +2,7 @@ import type { ChatState, Message } from '@microsoft/agent-host-protocol';
 import { boundedString, hash, identifier, MAX_PENDING, MAX_RECORDS, MAX_SEEN, MAX_TEXT_BYTES, record, SafeError } from './common.js';
 import { bindingKey, type Binding, type Credentials, type StoredMessage, Vault } from './storage.js';
 import type { BotApi, Updates } from './weixin.js';
+import { MessageEvents, type DeliveryOutcome } from './messageEvents.js';
 
 export const REQUEST_META = 'wechat-ahp/request-id';
 
@@ -47,6 +48,7 @@ export class Inbox {
 
   constructor(
     readonly vault: Vault, binding: Binding, readonly api: BotApi, private readonly log: (message: string) => void,
+    readonly events = new MessageEvents(),
   ) { this.key = bindingKey(binding); }
 
   async accept(batch: Updates, signal: AbortSignal): Promise<void> {
@@ -55,6 +57,7 @@ export class Inbox {
     const mapped = batch.msgs.map(value => incoming(value, state.credentials));
     for (const item of mapped) if ('dropped' in item) this.log(`Dropped Weixin message: ${item.dropped}.`);
     if (mapped.every(item => 'dropped' in item) && (!batch.cursor || batch.cursor === state.cursor)) return;
+    const received: string[] = [];
     await this.vault.update(next => {
       signal.throwIfAborted();
       for (const item of mapped) {
@@ -63,6 +66,7 @@ export class Inbox {
           throw new SafeError('Private inbox is full (32). No cursor advanced; inspect the bound chat and pending journal.');
         }
         next.messages.push({ ...item.message, binding: this.key, receivedAt: Date.now(), delivery: 'received' });
+        received.push(item.message.id);
         next.seen.push(item.message.id);
         next.peer = { binding: this.key, contextToken: item.message.contextToken };
       }
@@ -75,6 +79,7 @@ export class Inbox {
       // Private inbox, immutable route and cursor commit in ONE SecretStorage write.
       if (batch.cursor) next.cursor = batch.cursor;
     });
+    for (const id of received) this.events.input('wechatUser', id);
   }
 
   pending(): StoredMessage[] {
@@ -91,6 +96,8 @@ export class Inbox {
 
   async recover(state: ChatState): Promise<void> {
     let ambiguous = false;
+    const accepted: string[] = [];
+    const uncertain: string[] = [];
     await this.vault.update(next => {
       for (const message of next.messages) {
         if (message.binding !== this.key) continue;
@@ -107,12 +114,16 @@ export class Inbox {
           message.updatedAt = Date.now();
           if (turn) message.turnId = turn.id;
           if (queued) message.queueId = queued.id;
+          if (!message.resultRecorded) { message.resultRecorded = true; accepted.push(message.id); }
         } else {
           message.delivery = 'ambiguous';
           ambiguous = true;
+          if (!message.resultRecorded) { message.resultRecorded = true; uncertain.push(message.id); }
         }
       }
     });
+    for (const id of accepted) this.events.result('wechatUser', id, 'host_accepted');
+    for (const id of uncertain) this.events.result('wechatUser', id, 'uncertain');
     if (ambiguous) throw new SafeError('AHP delivery is ambiguous and absent from the retained snapshot. Inspect VS Code, then Clear Pending Journal; nothing was resent.', false, 'ambiguous');
   }
 
@@ -127,13 +138,29 @@ export class Inbox {
   }
 
   async accepted(id: string, turnId?: string): Promise<void> {
+    let recordResult = false;
     await this.vault.update(next => {
       const message = next.messages.find(m => m.id === id && m.binding === this.key);
-      if (!message || message.delivery === 'closed') return;
-      if (message.delivery !== 'dispatching' && message.delivery !== 'accepted') throw new SafeError('Unexpected AHP event acknowledgement.');
-      message.delivery = 'accepted';
+      if (!message) return;
+      if (!['dispatching', 'accepted', 'closed'].includes(message.delivery)) throw new SafeError('Unexpected AHP event acknowledgement.');
+      if (message.delivery !== 'closed') message.delivery = 'accepted';
       if (turnId) message.turnId = turnId;
+      if (!message.resultRecorded) { message.resultRecorded = true; recordResult = true; }
     });
+    if (recordResult) this.events.result('wechatUser', id, 'host_accepted');
   }
 
+  async result(id: string, outcome: DeliveryOutcome, error?: unknown): Promise<void> {
+    let recordResult = false;
+    try {
+      await this.vault.update(next => {
+        const message = next.messages.find(item => item.id === id && item.binding === this.key);
+        if (message && !message.resultRecorded) { message.resultRecorded = true; recordResult = true; }
+      });
+    } catch {
+      recordResult = !this.vault.snapshot().messages.find(item => item.id === id)?.resultRecorded;
+      this.log('Could not persist message outcome metadata; channel delivery state was retained.');
+    }
+    if (recordResult) this.events.result('wechatUser', id, outcome, error);
+  }
 }
