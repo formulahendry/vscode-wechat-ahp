@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.3] - 2026-09-20
 
 ### Changed
 
@@ -71,6 +71,7 @@ Initial preview release for native local desktop VS Code on Windows, macOS, and 
 - Direct text, one owner, and one bound chat. No remote hosts, groups, media,
   history backfill, or always-on background service.
 
+[0.1.3]: https://github.com/formulahendry/vscode-wechat-ahp/releases/tag/v0.1.3
 [0.1.2]: https://github.com/formulahendry/vscode-wechat-ahp/releases/tag/v0.1.2
 [0.1.1]: https://github.com/formulahendry/vscode-wechat-ahp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/formulahendry/vscode-wechat-ahp/releases/tag/v0.1.0

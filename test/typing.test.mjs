@@ -45,7 +45,7 @@ test('typing wire carries only the authorized owner, ticket/context and normal a
     assert.equal(options.headers.AuthorizationType, 'ilink_bot_token');
     assert.equal(options.headers['Content-Type'], 'application/json');
     assert.equal(options.headers['iLink-App-Id'], 'bot');
-    assert.equal(options.headers['iLink-App-ClientVersion'], '258');
+    assert.equal(options.headers['iLink-App-ClientVersion'], '259');
     assert.match(Buffer.from(options.headers['X-WECHAT-UIN'], 'base64').toString(), /^\d+$/);
     assert.ok(options.signal instanceof AbortSignal);
     assert.doesNotMatch(url, /OFFLINE-/);

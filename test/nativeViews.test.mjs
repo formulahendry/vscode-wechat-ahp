@@ -152,6 +152,7 @@ for (const mode of ['trusted', 'untrusted', 'virtual', 'empty']) test(`native vi
     const current = () => connection.getChildren();
     assert.equal(contexts.get('wechatAHP.active'), true);
     assert.equal(current().find(row => row.id === 'receive').value, 'Polling');
+    await waitFor(() => current().find(row => row.id === 'agent').value === 'Busy');
     assert.equal(current().find(row => row.id === 'agent').value, 'Busy');
     const pending = host.tool({ confirmed: null });
     const secondPending = host.tool({ confirmed: null });
